@@ -1,0 +1,6 @@
+/build/
+/cmake-build-*/
+/main
+*.out
+*.exe
+compile_commands.json
