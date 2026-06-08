@@ -18,17 +18,37 @@ Mini ATS Matching System은 거래소 내부의 매매 체결 시스템을 주�
 
 ## 현재 단계
 
-현재는 1단계로, 빌드 가능한 프로젝트 골격만 구성했습니다.
+현재는 프로젝트 골격, domain model, OrderBook, MatchingEngine, 기준정보 검증, PostgreSQL 기준정보 row adapter, replay input model, text command parser, replay log file I/O, gateway request/response model, response text formatter, accepted input recorder, TCP 주문 접수 skeleton, market data event model, UDP market data publisher skeleton, gateway와 publisher 연결 첫 버전, 운영 통계 model 첫 버전을 구현한 상태입니다.
 
 - CMake 기반 C++20 프로젝트
 - GoogleTest 세팅
 - 기본 디렉터리 구조
-- 최소 domain stub
+- `Order`, `Trade`, `ExecutionReport`, `CancelRequest` domain model
+- `InstrumentReference` 기반 tick size, 가격 제한폭, 시장 세션 model
+- `BookOrder`, `OrderBook` 기반 in-memory 주문장
+- 지정가 DAY, 시장가, IOC, FOK 주문 기준 가격-시간 우선 MatchingEngine
+- MatchingEngine cancel request 처리
+- MatchingEngine 기준정보 검증
+- `reference_data` 모듈 기반 PostgreSQL instrument row mapping
+- `replay` 모듈 기반 주문 입력/취소 입력 재생
+- `protocol` 모듈 기반 text command parsing
+- replay log stream/file reader/writer
+- `gateway` 모듈 기반 주문 접수 request/response와 reject mapping
+- gateway response canonical text formatter
+- accepted gateway input replay log recorder
+- line-delimited TCP order gateway skeleton
+- `marketdata` 모듈 기반 trade/book update event model
+- UDP market data publisher skeleton
+- accepted gateway command 결과를 UDP market data publisher로 전달하는 연결 경계
+- `stats` 모듈 기반 command count, 거래량, 거래대금, exact VWAP, latency percentile model
+- PostgreSQL schema/seed/reset script
 - 최소 application entry point
-- 샘플 unit test 1개
-- 초기 문서 placeholder
+- domain model unit test
+- order book unit test
+- matching engine unit test
+- 단계별 개발 기록
 
-아직 matching logic은 의도적으로 구현하지 않았습니다. 다음 단계에서 domain model, OrderBook, MatchingEngine 순서로 확장할 예정입니다.
+현재 MatchingEngine은 단일 종목 기준으로 주문 접수, 기준정보 검증, 즉시 체결, 잔량 resting, IOC 잔량 취소, FOK 사전 유동성 확인, resting order 취소를 지원합니다. PostgreSQL row를 `InstrumentReference`로 변환하는 경계, replay input model, text command parser, replay log file I/O, gateway request/response model, response text formatter, accepted input recorder, TCP order gateway skeleton, market data event model, UDP publisher skeleton, TCP gateway의 선택적 market data publish 경로, 운영 통계 model, stdin gateway stats 출력은 구현했으며, 실제 DB connection adapter와 TCP/benchmark 통계 노출은 이후 단계에서 확장할 예정입니다.
 
 ## 개발 환경
 
@@ -60,10 +80,58 @@ ctest --test-dir build
 ./scripts/run_tests.sh
 ```
 
+## 기준정보 DB
+
+`MINI_ATS_DB_NAME`과 `MINI_ATS_DB_USER`를 지정하지 않으면 각각 `mini_ats`, 현재 Linux 사용자를 사용합니다.
+
+```bash
+./scripts/setup_postgres.sh
+./scripts/reset_db.sh
+```
+
+현재 C++ 테스트는 PostgreSQL 서버 없이 실행됩니다. `reference_data` unit test는 DB row 모양의 값을 `InstrumentReference`로 변환하는 순수 adapter 경계를 검증합니다.
+
 ## 현재 실행
 
 ```bash
 ./build/mini_ats
+```
+
+text command gateway runner는 stdin에서 `SUBMIT`/`CANCEL` 한 줄 명령을 읽고 canonical gateway response를 stdout으로 출력합니다.
+
+```bash
+printf '%s\n' \
+  'SUBMIT seq=1 ref=7 order_id=10 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73500 quantity=10' \
+  | ./build/mini_ats --gateway
+```
+
+accepted input만 replay log로 남기려면 `--record-log`를 함께 사용합니다.
+
+```bash
+printf '%s\n' \
+  'SUBMIT seq=1 ref=7 order_id=10 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73500 quantity=10' \
+  | ./build/mini_ats --gateway --record-log accepted-input.log
+```
+
+처리 종료 시 운영 통계 snapshot을 함께 보려면 `--stats`를 추가합니다. Gateway response는 stdout, stats snapshot은 stderr로 출력합니다.
+
+```bash
+printf '%s\n' \
+  'SUBMIT seq=1 ref=7 order_id=10 instrument_id=1001 side=SELL type=LIMIT tif=DAY price=73700 quantity=3' \
+  'SUBMIT seq=2 ref=7 order_id=11 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73700 quantity=3' \
+  | ./build/mini_ats --gateway --stats
+```
+
+TCP skeleton은 newline으로 끝나는 text command를 받아 response text 한 줄을 돌려줍니다.
+
+```bash
+./build/mini_ats --tcp --port 9001 --record-log accepted-input.log
+```
+
+TCP gateway에서 accepted matching 결과를 UDP market data payload로 함께 publish하려면 `--market-data <addr> <port>`를 추가합니다.
+
+```bash
+./build/mini_ats --tcp --port 9001 --record-log accepted-input.log --market-data 127.0.0.1 9100
 ```
 
 또는 빌드 후 실행까지 한 번에 처리하려면 다음 스크립트를 사용할 수 있습니다.
@@ -75,6 +143,8 @@ ctest --test-dir build
 ## 개발 기록
 
 단계별 구현 후에는 입력, 실행 명령, 출력, 결과 판단을 [개발 기록](docs/development-log.md)에 남깁니다.
+
+OrderBook 상태 출력이 헷갈릴 때는 [OrderBook 상태 읽기](docs/orderbook-state.md)를 참고합니다.
 
 ## 디렉터리 구조
 
@@ -89,12 +159,18 @@ ctest --test-dir build
 │   ├── domain/
 │   ├── engine/
 │   ├── gateway/
+│   ├── protocol/
+│   ├── reference_data/
+│   ├── replay/
 │   ├── marketdata/
 │   └── stats/
 ├── src/
 │   ├── domain/
 │   ├── engine/
 │   ├── gateway/
+│   ├── protocol/
+│   ├── reference_data/
+│   ├── replay/
 │   ├── marketdata/
 │   ├── stats/
 │   └── main.cpp
