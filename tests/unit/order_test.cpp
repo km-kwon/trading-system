@@ -39,4 +39,39 @@ TEST(OrderTest, LimitOrderUsesIntegerPriceAndQuantity) {
     EXPECT_EQ(order.quantity, Quantity{10});
 }
 
+TEST(OrderTest, MarketOrderDoesNotRequirePrice) {
+    const Order order{
+        .id = OrderId{2},
+        .instrument_id = InstrumentId{1001},
+        .side = Side::Sell,
+        .type = OrderType::Market,
+        .time_in_force = TimeInForce::IOC,
+        .price = Price{0},
+        .quantity = Quantity{5},
+        .sequence = SequenceNumber{2},
+    };
+
+    EXPECT_FALSE(order.is_limit());
+    EXPECT_TRUE(order.is_market());
+    EXPECT_TRUE(order.has_valid_quantity());
+    EXPECT_TRUE(order.has_valid_price());
+}
+
+TEST(OrderTest, LimitOrderRequiresPositivePriceAndQuantity) {
+    const Order order{
+        .id = OrderId{3},
+        .instrument_id = InstrumentId{1001},
+        .side = Side::Buy,
+        .type = OrderType::Limit,
+        .time_in_force = TimeInForce::Day,
+        .price = Price{0},
+        .quantity = Quantity{0},
+        .sequence = SequenceNumber{3},
+    };
+
+    EXPECT_TRUE(order.is_limit());
+    EXPECT_FALSE(order.has_valid_quantity());
+    EXPECT_FALSE(order.has_valid_price());
+}
+
 }  // namespace
