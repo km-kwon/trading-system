@@ -1,4 +1,13 @@
--- 8단계에서 종목, 시장세션, 호가단위, 가격제한폭 관리를 위한
--- PostgreSQL 기준정보 테이블을 추가합니다.
-
 CREATE SCHEMA IF NOT EXISTS mini_ats;
+
+CREATE TABLE IF NOT EXISTS mini_ats.instruments (
+    instrument_id INTEGER PRIMARY KEY CHECK (instrument_id > 0),
+    symbol TEXT NOT NULL UNIQUE CHECK (length(symbol) > 0),
+    tick_size BIGINT NOT NULL CHECK (tick_size > 0),
+    lower_price_limit BIGINT NOT NULL CHECK (lower_price_limit > 0),
+    upper_price_limit BIGINT NOT NULL,
+    session TEXT NOT NULL CHECK (session IN ('OPEN', 'CLOSED')),
+    reference_version BIGINT NOT NULL CHECK (reference_version > 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (upper_price_limit >= lower_price_limit)
+);

@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "PostgreSQL 설정은 기준정보 구현 단계에서 추가할 예정입니다."
-echo "이 프로젝트는 Docker가 아니라 WSL Ubuntu의 local PostgreSQL을 사용합니다."
+if ! command -v psql >/dev/null 2>&1; then
+    echo "psql command not found. Install PostgreSQL client/server in WSL first." >&2
+    echo "Example: sudo apt-get install -y postgresql postgresql-client" >&2
+    exit 1
+fi
+
+DB_NAME="${MINI_ATS_DB_NAME:-mini_ats}"
+DB_USER="${MINI_ATS_DB_USER:-$USER}"
+
+echo "Applying schema to database '${DB_NAME}' as user '${DB_USER}'"
+psql -U "${DB_USER}" -d "${DB_NAME}" -f db/schema.sql
+psql -U "${DB_USER}" -d "${DB_NAME}" -f db/seed.sql
+echo "PostgreSQL reference data setup complete"
