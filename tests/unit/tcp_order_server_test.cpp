@@ -1,4 +1,5 @@
 #include "gateway/tcp_order_server.hpp"
+#include "stats/operational_stats.hpp"
 
 #include <gtest/gtest.h>
 
@@ -27,6 +28,7 @@ using mini_ats::engine::MatchingEngine;
 using mini_ats::gateway::TcpOrderServer;
 using mini_ats::gateway::TcpOrderServerRunResult;
 using mini_ats::gateway::TcpOrderServerStatus;
+using mini_ats::stats::OperationalStatistics;
 
 InstrumentReference make_instrument() {
     return InstrumentReference{
@@ -138,7 +140,8 @@ private:
 TEST(TcpOrderServerTest, ProcessesLineDelimitedCommandsOverLoopback) {
     MatchingEngine engine{make_instrument()};
     std::ostringstream accepted_input_log{};
-    TcpOrderServer server{engine, &accepted_input_log};
+    OperationalStatistics stats{};
+    TcpOrderServer server{engine, &accepted_input_log, nullptr, 1, &stats};
     const auto listen_status = server.listen("127.0.0.1", 0);
     if (listen_status != TcpOrderServerStatus::Ok) {
         GTEST_SKIP() << "loopback socket unavailable: "
@@ -181,6 +184,13 @@ TEST(TcpOrderServerTest, ProcessesLineDelimitedCommandsOverLoopback) {
               "tif=DAY price=73700 quantity=3\n"
               "SUBMIT seq=3 ref=7 order_id=202 instrument_id=1001 side=BUY type=LIMIT "
               "tif=DAY price=73700 quantity=5\n");
+    const auto stats_snapshot = stats.snapshot();
+    EXPECT_EQ(stats_snapshot.commands.received, 3U);
+    EXPECT_EQ(stats_snapshot.commands.accepted, 2U);
+    EXPECT_EQ(stats_snapshot.commands.rejected, 1U);
+    EXPECT_EQ(stats_snapshot.trades.trade_count, 1U);
+    EXPECT_EQ(stats_snapshot.trades.traded_quantity, mini_ats::domain::Quantity{3});
+    EXPECT_EQ(stats_snapshot.trades.traded_notional, 221100);
 }
 
 TEST(TcpOrderServerTest, ReportsInvalidBindAddress) {

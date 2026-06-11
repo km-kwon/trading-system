@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "벤치마크 target은 MatchingEngine 구현 이후 추가할 예정입니다."
+cmake -S . -B build
+cmake --build build
+
+if [[ $# -eq 0 ]]; then
+  ./build/mini_ats --benchmark --iterations 1000
+else
+  ./build/mini_ats --benchmark "$@"
+fi

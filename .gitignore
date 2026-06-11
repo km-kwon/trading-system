@@ -1,7 +1,34 @@
-/build/
-/cmake-build-*/
-/Testing/
-/main
-*.out
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Binaries and libraries
+*.a
+*.o
+*.so
+*.dylib
+*.dll
 *.exe
-compile_commands.json
+mini_ats
+mini_ats_unit_tests
+main
+
+# Runtime outputs
+*.log
+benchmark-results*.tsv
+benchmark-results*.csv
+accepted-input.log
+
+# Editor and OS files
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

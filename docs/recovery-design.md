@@ -26,6 +26,8 @@
 - 시장 세션
 - 기준정보 version
 
+`reference_data` 모듈은 PostgreSQL의 `mini_ats.instruments` row를 `InstrumentReference`로 변환합니다. 현재는 순수 row mapping과 `psql` 기반 단일 instrument loader adapter를 제공하며, `--load-instrument --instrument-id <id>` CLI로 해당 경계를 확인할 수 있습니다. stdin/TCP gateway는 `--load-reference-data --instrument-id <id>` 옵션으로 같은 loader 결과를 matching core에 주입할 수 있습니다.
+
 복구 replay에서는 주문 입력 sequence만 같아서는 충분하지 않습니다. 같은 주문이라도 tick size, 가격 제한폭, 시장 세션이 다르면 접수/거부 결과가 달라질 수 있기 때문입니다. 따라서 이후 입력 로그에는 주문 sequence와 함께 기준정보 version을 기록하고, replay 전에 동일한 version의 기준정보를 core에 주입하는 구조로 확장합니다.
 
 ## 현재 replay 입력 모델
@@ -74,7 +76,7 @@ writer 동작:
 
 `handle_published_text_command()`는 같은 accepted command 적용 결과에서 market data event를 만든 뒤 주입된 publisher로 전송합니다. rejected command는 accepted input log에도, market data stream에도 남기지 않습니다.
 
-`TcpOrderServer`도 같은 recorder/publisher 경계를 호출하므로 stdin runner와 TCP 접수 경로의 accepted input 기록 규칙이 같습니다. TCP gateway에 `--market-data <addr> <port>`를 지정하면 accepted matching 결과가 UDP market data payload로도 전송됩니다.
+`TcpOrderServer`도 같은 recorder/publisher 경계를 호출하므로 stdin runner와 TCP 접수 경로의 accepted input 기록 규칙이 같습니다. TCP gateway에 `--market-data <addr> <port>`를 지정하면 accepted matching 결과가 UDP market data payload로도 전송됩니다. `--stats`를 지정하면 TCP command 처리 결과도 `OperationalStatistics`에 기록됩니다.
 
 `marketdata` 모듈은 replay로 다시 얻은 `SubmitOrderResult`/`CancelOrderResult`와 최종 `OrderBookSnapshot`에서 `TradeEvent`/`BookUpdateEvent`를 다시 만들 수 있는 순수 adapter입니다. `format_market_data_event()`도 deterministic text payload를 만들기 때문에 같은 accepted input log와 같은 기준정보를 replay하면 market data event stream과 UDP payload도 결정적으로 재생할 수 있습니다.
 

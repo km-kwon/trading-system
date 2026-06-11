@@ -200,14 +200,42 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(mini_ats_stats PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+target_link_libraries(mini_ats_gateway
+    PUBLIC
+        mini_ats_stats
+)
+
+add_library(mini_ats_benchmark
+    src/benchmark/deterministic_benchmark.cpp
+)
+
+target_include_directories(mini_ats_benchmark
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(mini_ats_benchmark
+    PUBLIC
+        mini_ats_gateway
+        mini_ats_stats
+)
+
+target_compile_features(mini_ats_benchmark PUBLIC cxx_std_20)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mini_ats_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(mini_ats
     src/main.cpp
 )
 
 target_link_libraries(mini_ats
     PRIVATE
+        mini_ats_benchmark
         mini_ats_engine
         mini_ats_gateway
+        mini_ats_reference_data
         mini_ats_stats
 )
 
@@ -220,6 +248,7 @@ find_package(GTest REQUIRED)
 include(GoogleTest)
 
 add_executable(mini_ats_unit_tests
+    tests/unit/deterministic_benchmark_test.cpp
     tests/unit/domain_model_test.cpp
     tests/unit/gateway_test.cpp
     tests/unit/market_data_test.cpp
@@ -237,6 +266,7 @@ add_executable(mini_ats_unit_tests
 
 target_link_libraries(mini_ats_unit_tests
     PRIVATE
+        mini_ats_benchmark
         mini_ats_engine
         mini_ats_gateway
         mini_ats_marketdata

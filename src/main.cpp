@@ -1,3 +1,4 @@
+#include "benchmark/deterministic_benchmark.hpp"
 #include "domain/order.hpp"
 #include "gateway/gateway_recorder.hpp"
 #include "gateway/order_gateway.hpp"
@@ -5,15 +6,18 @@
 #include "engine/matching_engine.hpp"
 #include "engine/order_book.hpp"
 #include "marketdata/market_data_publisher.hpp"
+#include "reference_data/instrument_repository.hpp"
 #include "stats/operational_stats.hpp"
 
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <istream>
+#include <limits>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -49,11 +53,181 @@ namespace {
     return static_cast<std::uint16_t>(value);
 }
 
-int run_gateway(std::istream& input,
+[[nodiscard]] std::optional<std::size_t> parse_size(std::string_view text) noexcept {
+    std::uint64_t value{};
+    const char* const begin = text.data();
+    const char* const end = text.data() + text.size();
+    const auto [position, error] = std::from_chars(begin, end, value);
+    if (error != std::errc{} || position != end) {
+        return std::nullopt;
+    }
+
+    return static_cast<std::size_t>(value);
+}
+
+[[nodiscard]] std::optional<mini_ats::domain::InstrumentId> parse_instrument_id(
+    std::string_view text) noexcept {
+    const auto parsed = parse_size(text);
+    if (!parsed.has_value() || *parsed > static_cast<std::size_t>(
+                                      std::numeric_limits<mini_ats::domain::InstrumentId>::max())) {
+        return std::nullopt;
+    }
+
+    return static_cast<mini_ats::domain::InstrumentId>(*parsed);
+}
+
+[[nodiscard]] std::string default_database_name() {
+    if (const char* value = std::getenv("MINI_ATS_DB_NAME"); value != nullptr && *value != '\0') {
+        return value;
+    }
+
+    return "mini_ats";
+}
+
+[[nodiscard]] std::string default_database_user() {
+    if (const char* value = std::getenv("MINI_ATS_DB_USER"); value != nullptr && *value != '\0') {
+        return value;
+    }
+
+    if (const char* value = std::getenv("USER"); value != nullptr && *value != '\0') {
+        return value;
+    }
+
+    return {};
+}
+
+struct ReferenceDataOptions {
+    bool load_reference_data{false};
+    bool postgres_option_seen{false};
+    std::optional<mini_ats::domain::InstrumentId> instrument_id{};
+    mini_ats::reference_data::PostgresInstrumentRepositoryConfig config{
+        .database = default_database_name(),
+        .user = default_database_user(),
+        .psql_path = "psql",
+    };
+};
+
+enum class CliOptionParseResult {
+    Handled,
+    NotHandled,
+    Error,
+};
+
+[[nodiscard]] CliOptionParseResult parse_reference_data_option(
+    std::string_view option,
+    int argc,
+    char* argv[],
+    int& index,
+    ReferenceDataOptions& options,
+    std::ostream& error) {
+    if (option == "--load-reference-data") {
+        options.load_reference_data = true;
+        ++index;
+        return CliOptionParseResult::Handled;
+    }
+
+    if (option == "--instrument-id") {
+        if (index + 1 >= argc) {
+            error << "missing value for --instrument-id" << '\n';
+            return CliOptionParseResult::Error;
+        }
+
+        options.instrument_id = parse_instrument_id(argv[index + 1]);
+        if (!options.instrument_id.has_value() || *options.instrument_id == 0) {
+            error << "invalid instrument id: " << argv[index + 1] << '\n';
+            return CliOptionParseResult::Error;
+        }
+
+        index += 2;
+        return CliOptionParseResult::Handled;
+    }
+
+    if (option == "--db-name") {
+        if (index + 1 >= argc) {
+            error << "missing value for --db-name" << '\n';
+            return CliOptionParseResult::Error;
+        }
+
+        options.config.database = argv[index + 1];
+        options.postgres_option_seen = true;
+        index += 2;
+        return CliOptionParseResult::Handled;
+    }
+
+    if (option == "--db-user") {
+        if (index + 1 >= argc) {
+            error << "missing value for --db-user" << '\n';
+            return CliOptionParseResult::Error;
+        }
+
+        options.config.user = argv[index + 1];
+        options.postgres_option_seen = true;
+        index += 2;
+        return CliOptionParseResult::Handled;
+    }
+
+    if (option == "--psql") {
+        if (index + 1 >= argc) {
+            error << "missing value for --psql" << '\n';
+            return CliOptionParseResult::Error;
+        }
+
+        options.config.psql_path = argv[index + 1];
+        options.postgres_option_seen = true;
+        index += 2;
+        return CliOptionParseResult::Handled;
+    }
+
+    return CliOptionParseResult::NotHandled;
+}
+
+void print_instrument_load_error(
+    std::ostream& error,
+    std::string_view prefix,
+    const mini_ats::reference_data::PostgresInstrumentLoadResult& result) {
+    error << prefix << mini_ats::reference_data::to_text(result.error);
+    if (result.mapping_error != mini_ats::reference_data::InstrumentLoadError::None) {
+        error << " mapping=" << mini_ats::reference_data::to_text(result.mapping_error);
+    }
+    if (!result.detail.empty()) {
+        error << " detail=" << result.detail;
+    }
+    error << '\n';
+}
+
+[[nodiscard]] std::optional<mini_ats::domain::InstrumentReference> resolve_gateway_instrument(
+    const ReferenceDataOptions& options,
+    std::ostream& error) {
+    if (!options.load_reference_data) {
+        if (options.instrument_id.has_value() || options.postgres_option_seen) {
+            error << "reference data options require --load-reference-data" << '\n';
+            return std::nullopt;
+        }
+
+        return gateway_demo_instrument();
+    }
+
+    if (!options.instrument_id.has_value()) {
+        error << "--load-reference-data requires --instrument-id <id>" << '\n';
+        return std::nullopt;
+    }
+
+    const auto result = mini_ats::reference_data::load_instrument_reference_from_postgres(
+        options.config, *options.instrument_id);
+    if (!result.ok()) {
+        print_instrument_load_error(error, "failed to load reference data: ", result);
+        return std::nullopt;
+    }
+
+    return result.reference;
+}
+
+int run_gateway(const mini_ats::domain::InstrumentReference& instrument,
+                std::istream& input,
                 std::ostream& output,
                 std::ostream* accepted_input_log,
                 std::ostream* stats_output) {
-    mini_ats::engine::MatchingEngine engine{gateway_demo_instrument()};
+    mini_ats::engine::MatchingEngine engine{instrument};
     mini_ats::stats::OperationalStatistics stats{};
 
     std::string line{};
@@ -88,12 +262,16 @@ int run_gateway(std::istream& input,
     return output.good() && log_ok && stats_ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-int run_tcp_gateway(std::uint16_t port,
+int run_tcp_gateway(const mini_ats::domain::InstrumentReference& instrument,
+                    std::uint16_t port,
                     std::ostream* accepted_input_log,
-                    mini_ats::marketdata::UdpMarketDataPublisher* market_data_publisher) {
-    mini_ats::engine::MatchingEngine engine{gateway_demo_instrument()};
+                    mini_ats::marketdata::UdpMarketDataPublisher* market_data_publisher,
+                    std::ostream* stats_output) {
+    mini_ats::engine::MatchingEngine engine{instrument};
+    mini_ats::stats::OperationalStatistics stats{};
+    auto* stats_ptr = stats_output == nullptr ? nullptr : &stats;
     mini_ats::gateway::TcpOrderServer server{engine, accepted_input_log,
-                                             market_data_publisher};
+                                             market_data_publisher, 1, stats_ptr};
 
     const auto listen_status = server.listen("127.0.0.1", port);
     if (listen_status != mini_ats::gateway::TcpOrderServerStatus::Ok) {
@@ -106,7 +284,14 @@ int run_tcp_gateway(std::uint16_t port,
     if (market_data_publisher != nullptr) {
         std::cerr << "Mini ATS market data publisher enabled" << '\n';
     }
+    if (stats_output != nullptr) {
+        std::cerr << "Mini ATS TCP stats enabled" << '\n';
+    }
     const auto result = server.serve();
+    if (stats_output != nullptr) {
+        *stats_output << mini_ats::stats::format_operational_statistics(stats.snapshot())
+                      << '\n';
+    }
     if (!result.ok()) {
         std::cerr << "TCP gateway stopped: " << mini_ats::gateway::to_text(result.status)
                   << " clients=" << result.clients_served
@@ -121,12 +306,23 @@ void print_usage(std::ostream& output, std::string_view program_name) {
     output << "Usage:\n"
            << "  " << program_name << "              Run deterministic matching demo\n"
            << "  " << program_name << " --gateway [--record-log <path>] [--stats]\n"
+           << "                         [--load-reference-data --instrument-id <id>]\n"
+           << "                         [--db-name <name>] [--db-user <user>] [--psql <path>]\n"
            << "                         Read text commands from stdin\n"
            << "                         Append accepted input commands and/or print stats\n"
            << "  " << program_name
            << " --tcp --port <port> [--record-log <path>]\n"
-           << "                         [--market-data <addr> <port>]\n"
+           << "                         [--market-data <addr> <port>] [--stats]\n"
+           << "                         [--load-reference-data --instrument-id <id>]\n"
+           << "                         [--db-name <name>] [--db-user <user>] [--psql <path>]\n"
            << "                         Serve TCP orders and optionally publish market data\n"
+           << "  " << program_name << " --benchmark [--iterations <n>] [--output <path>]\n"
+           << "                         Run deterministic gateway benchmark scenario\n"
+           << "                         Append result payload when --output is set\n"
+           << "  " << program_name
+           << " --load-instrument --instrument-id <id>\n"
+           << "                         [--db-name <name>] [--db-user <user>] [--psql <path>]\n"
+           << "                         Load one instrument reference from PostgreSQL via psql\n"
            << "  " << program_name << " --help       Show this help\n";
 }
 
@@ -226,6 +422,7 @@ int main(int argc, char* argv[]) {
         std::ofstream accepted_input_log{};
         std::ostream* accepted_input_log_ptr = nullptr;
         bool stats_enabled = false;
+        ReferenceDataOptions reference_data_options{};
 
         int index = 2;
         while (index < argc) {
@@ -253,11 +450,25 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
+            const auto reference_data_option = parse_reference_data_option(
+                option, argc, argv, index, reference_data_options, std::cerr);
+            if (reference_data_option == CliOptionParseResult::Handled) {
+                continue;
+            }
+            if (reference_data_option == CliOptionParseResult::Error) {
+                return EXIT_FAILURE;
+            }
+
             print_usage(std::cerr, program_name);
             return EXIT_FAILURE;
         }
 
-        return run_gateway(std::cin, std::cout, accepted_input_log_ptr,
+        const auto instrument = resolve_gateway_instrument(reference_data_options, std::cerr);
+        if (!instrument.has_value()) {
+            return EXIT_FAILURE;
+        }
+
+        return run_gateway(*instrument, std::cin, std::cout, accepted_input_log_ptr,
                            stats_enabled ? &std::cerr : nullptr);
     }
 
@@ -282,6 +493,8 @@ int main(int argc, char* argv[]) {
         std::ostream* accepted_input_log_ptr = nullptr;
         mini_ats::marketdata::UdpMarketDataPublisher market_data_publisher{};
         mini_ats::marketdata::UdpMarketDataPublisher* market_data_publisher_ptr = nullptr;
+        bool stats_enabled = false;
+        ReferenceDataOptions reference_data_options{};
 
         int index = 4;
         while (index < argc) {
@@ -327,11 +540,171 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
+            if (option == "--stats") {
+                stats_enabled = true;
+                ++index;
+                continue;
+            }
+
+            const auto reference_data_option = parse_reference_data_option(
+                option, argc, argv, index, reference_data_options, std::cerr);
+            if (reference_data_option == CliOptionParseResult::Handled) {
+                continue;
+            }
+            if (reference_data_option == CliOptionParseResult::Error) {
+                return EXIT_FAILURE;
+            }
+
             print_usage(std::cerr, program_name);
             return EXIT_FAILURE;
         }
 
-        return run_tcp_gateway(*port, accepted_input_log_ptr, market_data_publisher_ptr);
+        const auto instrument = resolve_gateway_instrument(reference_data_options, std::cerr);
+        if (!instrument.has_value()) {
+            return EXIT_FAILURE;
+        }
+
+        return run_tcp_gateway(*instrument, *port, accepted_input_log_ptr, market_data_publisher_ptr,
+                               stats_enabled ? &std::cerr : nullptr);
+    }
+
+    if (mode == "--benchmark") {
+        std::size_t iterations = 1000;
+        std::optional<std::string> output_path{};
+        int index = 2;
+        while (index < argc) {
+            const std::string_view option{argv[index]};
+            if (option == "--iterations") {
+                if (index + 1 >= argc) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                const auto parsed_iterations = parse_size(argv[index + 1]);
+                if (!parsed_iterations.has_value() || *parsed_iterations == 0) {
+                    std::cerr << "invalid benchmark iterations: " << argv[index + 1] << '\n';
+                    return EXIT_FAILURE;
+                }
+
+                iterations = *parsed_iterations;
+                index += 2;
+                continue;
+            }
+
+            if (option == "--output") {
+                if (index + 1 >= argc || output_path.has_value()) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                output_path = argv[index + 1];
+                index += 2;
+                continue;
+            }
+
+            print_usage(std::cerr, program_name);
+            return EXIT_FAILURE;
+        }
+
+        std::ofstream benchmark_output{};
+        if (output_path.has_value()) {
+            benchmark_output.open(*output_path, std::ios::app);
+            if (!benchmark_output.is_open()) {
+                std::cerr << "failed to open benchmark output: " << *output_path << '\n';
+                return EXIT_FAILURE;
+            }
+        }
+
+        const auto result = mini_ats::benchmark::run_deterministic_gateway_benchmark(iterations);
+        const auto formatted = mini_ats::benchmark::format_deterministic_benchmark_result(result);
+        std::cout << formatted << '\n';
+        if (benchmark_output.is_open()) {
+            benchmark_output << formatted << '\n';
+        }
+
+        const bool benchmark_output_ok = !benchmark_output.is_open() || benchmark_output.good();
+        return std::cout.good() && benchmark_output_ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (mode == "--load-instrument") {
+        std::optional<mini_ats::domain::InstrumentId> instrument_id{};
+        mini_ats::reference_data::PostgresInstrumentRepositoryConfig config{
+            .database = default_database_name(),
+            .user = default_database_user(),
+            .psql_path = "psql",
+        };
+
+        int index = 2;
+        while (index < argc) {
+            const std::string_view option{argv[index]};
+            if (option == "--instrument-id") {
+                if (index + 1 >= argc) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                instrument_id = parse_instrument_id(argv[index + 1]);
+                if (!instrument_id.has_value() || *instrument_id == 0) {
+                    std::cerr << "invalid instrument id: " << argv[index + 1] << '\n';
+                    return EXIT_FAILURE;
+                }
+
+                index += 2;
+                continue;
+            }
+
+            if (option == "--db-name") {
+                if (index + 1 >= argc) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                config.database = argv[index + 1];
+                index += 2;
+                continue;
+            }
+
+            if (option == "--db-user") {
+                if (index + 1 >= argc) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                config.user = argv[index + 1];
+                index += 2;
+                continue;
+            }
+
+            if (option == "--psql") {
+                if (index + 1 >= argc) {
+                    print_usage(std::cerr, program_name);
+                    return EXIT_FAILURE;
+                }
+
+                config.psql_path = argv[index + 1];
+                index += 2;
+                continue;
+            }
+
+            print_usage(std::cerr, program_name);
+            return EXIT_FAILURE;
+        }
+
+        if (!instrument_id.has_value()) {
+            print_usage(std::cerr, program_name);
+            return EXIT_FAILURE;
+        }
+
+        const auto result = mini_ats::reference_data::load_instrument_reference_from_postgres(
+            config, *instrument_id);
+        if (!result.ok()) {
+            print_instrument_load_error(std::cerr, "failed to load instrument: ", result);
+            return EXIT_FAILURE;
+        }
+
+        std::cout << mini_ats::reference_data::format_instrument_reference(*result.reference)
+                  << '\n';
+        return std::cout.good() ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (mode == "--help" || mode == "-h") {

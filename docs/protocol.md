@@ -80,6 +80,14 @@ printf '%s\n' \
   | ./build/mini_ats --gateway --stats
 ```
 
+PostgreSQL 기준정보를 matching engine에 주입하려면 `--load-reference-data --instrument-id <id>`를 지정합니다. 이때 command의 `ref` 값은 DB row의 `reference_version`과 같아야 합니다.
+
+```bash
+printf '%s\n' \
+  'SUBMIT seq=1 ref=7 order_id=10 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73500 quantity=10' \
+  | ./build/mini_ats --gateway --load-reference-data --instrument-id 1001
+```
+
 TCP skeleton 실행:
 
 ```bash
@@ -90,6 +98,43 @@ TCP gateway에서 market data를 함께 publish하려면 UDP destination을 지�
 
 ```bash
 ./build/mini_ats --tcp --port 9001 --record-log accepted-input.log --market-data 127.0.0.1 9100
+```
+
+TCP gateway도 `--stats`를 지원합니다. TCP server는 장시간 실행되므로 정상 실행 중에는 계속 serve하고, 종료 또는 오류 경로에서 stats snapshot을 stderr로 출력합니다.
+
+```bash
+./build/mini_ats --tcp --port 9001 --record-log accepted-input.log --stats
+```
+
+TCP gateway에서도 같은 기준정보 loader 옵션을 사용할 수 있습니다.
+
+```bash
+./build/mini_ats --tcp --port 9001 --load-reference-data --instrument-id 1001 \
+  --db-name mini_ats --db-user "$USER" --psql psql
+```
+
+Deterministic benchmark runner는 고정 gateway 입력 시나리오를 반복 실행하고, 결과를 한 줄 payload로 출력합니다.
+
+```bash
+./build/mini_ats --benchmark --iterations 1000
+```
+
+결과를 파일에도 남기려면 `--output <path>`를 지정합니다. 같은 payload가 stdout으로 출력되고 파일에는 append됩니다.
+
+```bash
+./build/mini_ats --benchmark --iterations 1000 --output benchmark-results.log
+```
+
+단일 instrument 기준정보를 PostgreSQL에서 읽어오는 CLI도 제공합니다. 이 경로는 `psql` 실행 파일을 사용하고, 성공 시 `INSTRUMENT ...` 한 줄을 출력합니다.
+
+```bash
+./build/mini_ats --load-instrument --instrument-id 1001
+```
+
+Instrument load text 예시:
+
+```text
+INSTRUMENT instrument_id=1001 tick_size=5 lower_price_limit=70000 upper_price_limit=80000 session=OPEN reference_version=7
 ```
 
 TCP client는 한 command를 `\n`으로 끝내야 하며, server는 처리한 command마다 response text 한 줄을 돌려줍니다. 현재 server는 `127.0.0.1`에 bind하고 client를 순차 처리하는 skeleton입니다.
@@ -111,6 +156,12 @@ Stats text 예시:
 
 ```text
 STATS commands_received=2 commands_accepted=2 commands_rejected=0 trades=1 traded_quantity=3 traded_notional=221100 vwap_notional=221100 vwap_quantity=3 vwap_floor_price=73700 latency_samples=2 latency_min_ns=10000 latency_max_ns=50000 latency_p50_ns=10000 latency_p95_ns=50000 latency_p99_ns=50000
+```
+
+Benchmark text 예시:
+
+```text
+BENCHMARK scenario=deterministic_gateway iterations=2 commands=6 elapsed_ns=861707 commands_per_second_floor=6962 compiler=gcc-13.3.0 cpp_standard=202002 build_mode=debug os=linux architecture=x86_64 hardware_threads=28 STATS commands_received=6 commands_accepted=4 commands_rejected=2 trades=2 traded_quantity=6 traded_notional=442200 vwap_notional=442200 vwap_quantity=6 vwap_floor_price=73700 latency_samples=6 latency_min_ns=7619 latency_max_ns=783971 latency_p50_ns=8338 latency_p95_ns=783971 latency_p99_ns=783971
 ```
 
 Accepted input recorder는 `ACCEPTED` 응답만 replay log에 기록합니다. `PARSE_ERROR`, `REPLAY_VALIDATION_ERROR`, `ENGINE_REJECTED` 응답은 복구 입력 스트림에 남기지 않습니다.

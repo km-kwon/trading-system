@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -76,6 +77,8 @@ void trim_line_ending(std::string& line) {
                                                         marketdata::UdpMarketDataPublisher*
                                                             market_data_publisher,
                                                         std::size_t market_data_depth,
+                                                        stats::OperationalStatistics*
+                                                            operational_stats,
                                                         int client_fd,
                                                         std::string line) {
     trim_line_ending(line);
@@ -83,6 +86,7 @@ void trim_line_ending(std::string& line) {
         return TcpOrderServerStatus::Ok;
     }
 
+    const auto started_at = std::chrono::steady_clock::now();
     bool recorded = true;
     marketdata::MarketDataPublishResult publish_result{};
     GatewayResponse response{};
@@ -99,6 +103,11 @@ void trim_line_ending(std::string& line) {
         const auto result = handle_recorded_text_command(engine, line, *accepted_input_log);
         response = result.response;
         recorded = result.recorded;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - started_at);
+    if (operational_stats != nullptr) {
+        operational_stats->record_command_result(response.accepted(), response.trades, elapsed);
     }
 
     auto output = format_gateway_response(response);
@@ -123,6 +132,8 @@ void trim_line_ending(std::string& line) {
                                                  marketdata::UdpMarketDataPublisher*
                                                      market_data_publisher,
                                                  std::size_t market_data_depth,
+                                                 stats::OperationalStatistics*
+                                                     operational_stats,
                                                  int client_fd) {
     ClientProcessResult result{};
     std::string pending{};
@@ -150,6 +161,7 @@ void trim_line_ending(std::string& line) {
 
             const auto status = process_command_line(engine, accepted_input_log,
                                                      market_data_publisher, market_data_depth,
+                                                     operational_stats,
                                                      client_fd, std::move(line));
             if (status != TcpOrderServerStatus::Ok) {
                 result.status = status;
@@ -163,6 +175,7 @@ void trim_line_ending(std::string& line) {
     if (!pending.empty()) {
         const auto status = process_command_line(engine, accepted_input_log,
                                                  market_data_publisher, market_data_depth,
+                                                 operational_stats,
                                                  client_fd, std::move(pending));
         if (status != TcpOrderServerStatus::Ok) {
             result.status = status;
@@ -184,11 +197,13 @@ TcpOrderServer::TcpOrderServer(
     engine::MatchingEngine& engine,
     std::ostream* accepted_input_log,
     marketdata::UdpMarketDataPublisher* market_data_publisher,
-    std::size_t market_data_depth) noexcept
+    std::size_t market_data_depth,
+    stats::OperationalStatistics* operational_stats) noexcept
     : engine_{engine},
       accepted_input_log_{accepted_input_log},
       market_data_publisher_{market_data_publisher},
-      market_data_depth_{market_data_depth} {}
+      market_data_depth_{market_data_depth},
+      operational_stats_{operational_stats} {}
 
 TcpOrderServer::~TcpOrderServer() {
     close();
@@ -250,7 +265,7 @@ TcpOrderServerRunResult TcpOrderServer::serve(std::size_t max_clients) {
         }
 
         auto client_result = process_client(engine_, accepted_input_log_, market_data_publisher_,
-                                            market_data_depth_, client_fd);
+                                            market_data_depth_, operational_stats_, client_fd);
         close_fd(client_fd);
         ++result.clients_served;
         result.commands_processed += client_result.commands_processed;

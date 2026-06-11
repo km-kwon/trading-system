@@ -13,7 +13,7 @@ INSERT INTO mini_ats.instruments (
     70000,
     80000,
     'OPEN',
-    1
+    7
 ) ON CONFLICT (instrument_id) DO UPDATE SET
     symbol = EXCLUDED.symbol,
     tick_size = EXCLUDED.tick_size,

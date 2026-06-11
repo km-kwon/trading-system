@@ -2209,3 +2209,953 @@ Latency 값은 실제 실행 시간 측정값이므로 실행마다 달라집니
 - TCP gateway에 stats collector를 주입하고 종료/오류 시 snapshot 출력
 - deterministic benchmark runner 추가
 - benchmark 문서에 고정 입력 시나리오와 측정 결과 기록
+
+## 2026-06-09 21단계: TCP stats collector와 deterministic benchmark runner 추가
+
+### 목표
+
+운영 통계 model을 TCP gateway와 deterministic benchmark runner에 연결합니다.
+
+이번 단계에서는 DB 기반 기준정보 로딩이나 외부 benchmark 저장소는 구현하지 않습니다. 대신 장시간 실행 경로인 TCP server에 stats collector를 주입하고, 재현 가능한 고정 gateway 입력 시나리오를 반복 실행하는 benchmark runner를 추가합니다.
+
+### 입력
+
+Benchmark iteration 1회 입력:
+
+```text
+SUBMIT seq=1 ref=7 order_id=1000 instrument_id=1001 side=SELL type=LIMIT tif=DAY price=73700 quantity=3
+SUBMIT seq=2 ref=7 order_id=1001 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73700 quantity=3
+SUBMIT seq=3 ref=7 order_id=1002 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73702 quantity=1
+```
+
+Iteration 1회 기대 집계:
+
+```text
+commands=3 accepted=2 rejected=1 trades=1 traded_quantity=3 traded_notional=221100 vwap_floor_price=73700
+```
+
+### 변경 내용
+
+- `TcpOrderServer`에 선택적 `OperationalStatistics*` 주입
+- TCP command 처리 latency 측정
+- TCP response accepted 여부와 trade 목록을 stats collector에 기록
+- TCP CLI에 `--stats` 옵션 추가
+- TCP 종료/오류 경로에서 stats snapshot을 stderr에 출력
+- `mini_ats_benchmark` CMake library 추가
+- `run_deterministic_gateway_benchmark()` 추가
+- `format_deterministic_benchmark_result()` 추가
+- `mini_ats --benchmark [--iterations <n>]` CLI 추가
+- deterministic benchmark unit test 2개 추가
+- TCP loopback test에 stats snapshot 검증 추가
+- README, architecture, protocol, benchmark 문서에 TCP stats와 benchmark runner 반영
+
+### 실행 명령
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/mini_ats_unit_tests --gtest_filter=DeterministicBenchmarkTest.*:OperationalStatsTest.*
+./build/mini_ats_unit_tests --gtest_filter=TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback
+./build/mini_ats --help
+./build/mini_ats --benchmark --iterations 2
+./build/mini_ats --benchmark --iterations 0
+ctest --test-dir build --output-on-failure
+git diff --check
+```
+
+### 출력
+
+`./build/mini_ats_unit_tests --gtest_filter=DeterministicBenchmarkTest.*:OperationalStatsTest.*`
+
+```text
+[ RUN      ] DeterministicBenchmarkTest.RunsFixedGatewayScenarioAndCollectsStats
+[       OK ] DeterministicBenchmarkTest.RunsFixedGatewayScenarioAndCollectsStats (0 ms)
+[ RUN      ] DeterministicBenchmarkTest.FormatsBenchmarkSummaryWithStatsPayload
+[       OK ] DeterministicBenchmarkTest.FormatsBenchmarkSummaryWithStatsPayload (0 ms)
+[ RUN      ] OperationalStatsTest.AccumulatesTradeVolumeNotionalAndExactVwapFromEngineResults
+[       OK ] OperationalStatsTest.AccumulatesTradeVolumeNotionalAndExactVwapFromEngineResults (0 ms)
+[ RUN      ] OperationalStatsTest.RecordsCommandCountsLatencyPercentilesAndAcceptedTrades
+[       OK ] OperationalStatsTest.RecordsCommandCountsLatencyPercentilesAndAcceptedTrades (0 ms)
+[ RUN      ] OperationalStatsTest.IgnoresInvalidTradesClampsNegativeLatencyAndResets
+[       OK ] OperationalStatsTest.IgnoresInvalidTradesClampsNegativeLatencyAndResets (0 ms)
+[  PASSED  ] 5 tests.
+```
+
+`./build/mini_ats_unit_tests --gtest_filter=TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback`
+
+```text
+[ RUN      ] TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback
+[       OK ] TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback (0 ms)
+[  PASSED  ] 1 test.
+```
+
+`./build/mini_ats --help`
+
+```text
+Usage:
+  ./build/mini_ats              Run deterministic matching demo
+  ./build/mini_ats --gateway [--record-log <path>] [--stats]
+                         Read text commands from stdin
+                         Append accepted input commands and/or print stats
+  ./build/mini_ats --tcp --port <port> [--record-log <path>]
+                         [--market-data <addr> <port>] [--stats]
+                         Serve TCP orders and optionally publish market data
+  ./build/mini_ats --benchmark [--iterations <n>]
+                         Run deterministic gateway benchmark scenario
+  ./build/mini_ats --help       Show this help
+```
+
+`./build/mini_ats --benchmark --iterations 2`
+
+```text
+BENCHMARK scenario=deterministic_gateway iterations=2 commands=6 elapsed_ns=<runtime> STATS commands_received=6 commands_accepted=4 commands_rejected=2 trades=2 traded_quantity=6 traded_notional=442200 vwap_notional=442200 vwap_quantity=6 vwap_floor_price=73700 latency_samples=6 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+```
+
+`./build/mini_ats --benchmark --iterations 0`
+
+```text
+invalid benchmark iterations: 0
+```
+
+`ctest --test-dir build --output-on-failure`
+
+```text
+1/87 Test #1: DeterministicBenchmarkTest.RunsFixedGatewayScenarioAndCollectsStats ......   Passed
+2/87 Test #2: DeterministicBenchmarkTest.FormatsBenchmarkSummaryWithStatsPayload .......   Passed
+32/87 Test #32: MarketDataPublisherTest.PublishesSingleDatagramOverLoopback ............***Skipped
+80/87 Test #80: TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback ..........***Skipped
+
+100% tests passed, 0 tests failed out of 87
+```
+
+### 결과 판단
+
+성공입니다.
+
+- TCP gateway가 command별 처리 latency와 accepted/rejected count를 stats collector에 기록함
+- TCP loopback smoke에서 stats snapshot이 command 3개, accepted 2개, rejected 1개, trade 1개로 집계됨
+- deterministic benchmark runner가 고정 gateway 시나리오를 반복 실행함
+- iteration 2회 기준 command 6개, accepted 4개, rejected 2개, trade 2개, 거래대금 442200으로 집계됨
+- invalid benchmark iteration은 명시적 오류로 거부함
+- 전체 ctest는 87개 기준 85개 통과, UDP/TCP loopback 2개 sandbox skip
+- TCP loopback 단독 실행은 통과
+
+### 다음 단계
+
+다음 단계에서는 PostgreSQL connection adapter 또는 benchmark 결과 기록을 추가합니다.
+
+- `reference_data`의 SQL/query model 뒤에 실제 PostgreSQL loader adapter 추가
+- benchmark runner 결과를 파일로 기록하는 옵션 추가
+- README에 end-to-end 실행 시나리오 정리
+
+## 2026-06-09 22단계: psql 기반 PostgreSQL instrument loader adapter 추가
+
+### 목표
+
+`reference_data`의 순수 row mapping 뒤에 PostgreSQL에서 단일 instrument 기준정보를 읽어오는 loader adapter를 추가합니다.
+
+현재 개발 환경에는 `psql` 실행 파일과 libpq header가 없으므로, libpq에 직접 link하는 대신 `psql` CLI adapter를 먼저 구현합니다. 이 구조는 빌드 의존성을 늘리지 않으면서도 DB query, TSV output parsing, mapping 실패, command 실패를 명확히 분리합니다.
+
+### 입력
+
+psql TSV output:
+
+```text
+1001	DEMO	5	70000	80000	OPEN	7
+```
+
+CLI 성공 시 출력 형식:
+
+```text
+INSTRUMENT instrument_id=1001 tick_size=5 lower_price_limit=70000 upper_price_limit=80000 session=OPEN reference_version=7
+```
+
+CLI 실패 경로:
+
+```bash
+./build/mini_ats --load-instrument --instrument-id 1001 --psql definitely-missing-psql-binary
+```
+
+### 변경 내용
+
+- `PostgresInstrumentLoadError` 추가
+- `PostgresInstrumentRepositoryConfig` 추가
+- `PostgresInstrumentLoadResult` 추가
+- `instrument_reference_psql_query()` 추가
+- `build_psql_instrument_command()` 추가
+- `parse_psql_instrument_result()` 추가
+- `load_instrument_reference_from_postgres()` 추가
+- `format_instrument_reference()` 추가
+- `InstrumentLoadError` / `PostgresInstrumentLoadError` text formatter 추가
+- `mini_ats --load-instrument --instrument-id <id>` CLI 추가
+- `--db-name`, `--db-user`, `--psql` 옵션 추가
+- `MINI_ATS_DB_NAME`, `MINI_ATS_DB_USER`, `USER` env fallback 추가
+- DB seed의 `reference_version`을 gateway/replay 예제와 맞게 `7`로 조정
+- psql query/command builder, TSV parser, malformed output, command failure unit test 추가
+- README, architecture, protocol, recovery-design 문서에 psql loader adapter 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./build/mini_ats_unit_tests --gtest_filter=ReferenceDataTest.*
+./build/mini_ats --help
+./build/mini_ats --load-instrument --instrument-id 0
+./build/mini_ats --load-instrument --instrument-id 1001 --psql definitely-missing-psql-binary
+ctest --test-dir build --output-on-failure
+git diff --check
+```
+
+### 출력
+
+`./build/mini_ats_unit_tests --gtest_filter=ReferenceDataTest.*`
+
+```text
+[ RUN      ] ReferenceDataTest.ParsesMarketSessionFromPostgresValue
+[       OK ] ReferenceDataTest.ParsesMarketSessionFromPostgresValue (0 ms)
+[ RUN      ] ReferenceDataTest.MapsInstrumentRecordToInstrumentReference
+[       OK ] ReferenceDataTest.MapsInstrumentRecordToInstrumentReference (0 ms)
+[ RUN      ] ReferenceDataTest.RejectsInvalidInstrumentRecordFields
+[       OK ] ReferenceDataTest.RejectsInvalidInstrumentRecordFields (0 ms)
+[ RUN      ] ReferenceDataTest.ExposesParameterizedInstrumentReferenceQuery
+[       OK ] ReferenceDataTest.ExposesParameterizedInstrumentReferenceQuery (0 ms)
+[ RUN      ] ReferenceDataTest.BuildsPsqlInstrumentQueryAndCommand
+[       OK ] ReferenceDataTest.BuildsPsqlInstrumentQueryAndCommand (0 ms)
+[ RUN      ] ReferenceDataTest.ParsesPsqlInstrumentResultRow
+[       OK ] ReferenceDataTest.ParsesPsqlInstrumentResultRow (0 ms)
+[ RUN      ] ReferenceDataTest.RejectsMalformedPsqlInstrumentResults
+[       OK ] ReferenceDataTest.RejectsMalformedPsqlInstrumentResults (0 ms)
+[ RUN      ] ReferenceDataTest.ReportsPostgresCommandFailureWithoutMutatingState
+[       OK ] ReferenceDataTest.ReportsPostgresCommandFailureWithoutMutatingState (41 ms)
+[  PASSED  ] 8 tests.
+```
+
+`./build/mini_ats --help`
+
+```text
+Usage:
+  ./build/mini_ats              Run deterministic matching demo
+  ./build/mini_ats --gateway [--record-log <path>] [--stats]
+                         Read text commands from stdin
+                         Append accepted input commands and/or print stats
+  ./build/mini_ats --tcp --port <port> [--record-log <path>]
+                         [--market-data <addr> <port>] [--stats]
+                         Serve TCP orders and optionally publish market data
+  ./build/mini_ats --benchmark [--iterations <n>]
+                         Run deterministic gateway benchmark scenario
+  ./build/mini_ats --load-instrument --instrument-id <id>
+                         [--db-name <name>] [--db-user <user>] [--psql <path>]
+                         Load one instrument reference from PostgreSQL via psql
+  ./build/mini_ats --help       Show this help
+```
+
+`./build/mini_ats --load-instrument --instrument-id 0`
+
+```text
+invalid instrument id: 0
+```
+
+`./build/mini_ats --load-instrument --instrument-id 1001 --psql definitely-missing-psql-binary`
+
+```text
+failed to load instrument: COMMAND_FAILED detail=psql command failed
+```
+
+`ctest --test-dir build --output-on-failure`
+
+```text
+69/91 Test #69: ReferenceDataTest.BuildsPsqlInstrumentQueryAndCommand .............   Passed
+70/91 Test #70: ReferenceDataTest.ParsesPsqlInstrumentResultRow ...................   Passed
+71/91 Test #71: ReferenceDataTest.RejectsMalformedPsqlInstrumentResults ...........   Passed
+72/91 Test #72: ReferenceDataTest.ReportsPostgresCommandFailureWithoutMutatingState Passed
+32/91 Test #32: MarketDataPublisherTest.PublishesSingleDatagramOverLoopback .......***Skipped
+84/91 Test #84: TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback .....***Skipped
+
+100% tests passed, 0 tests failed out of 91
+```
+
+### 결과 판단
+
+성공입니다.
+
+- PostgreSQL row mapping 뒤에 psql 기반 loader adapter를 추가함
+- psql TSV output 한 줄을 `InstrumentReference`로 변환함
+- malformed output, multiple rows, empty result, numeric parse failure를 구분함
+- psql command 실패를 명시적 `COMMAND_FAILED`로 반환함
+- `--load-instrument` CLI로 DB 기준정보 조회 경계를 실행할 수 있음
+- 현재 환경에는 `psql`이 없어 실제 DB 성공 경로는 실행하지 못했고, 실패 경로를 검증함
+- 전체 ctest는 91개 기준 89개 통과, UDP/TCP loopback 2개 sandbox skip
+
+### 다음 단계
+
+다음 단계에서는 기준정보 loader를 gateway 실행 경로 또는 benchmark 기록 경로에 연결합니다.
+
+- `--gateway` / `--tcp`에서 `--instrument-id`와 `--load-reference-data` 옵션으로 DB 기준정보 주입
+- benchmark 결과를 파일로 기록하는 옵션 추가
+- `psql`/PostgreSQL 설치 환경에서 end-to-end smoke 실행
+
+## 2026-06-09 23단계: Gateway 실행 경로에 기준정보 loader 연결
+
+### 목표
+
+22단계에서 만든 psql 기반 PostgreSQL instrument loader를 실제 주문 접수 실행 경로에 연결합니다.
+
+이번 단계에서는 libpq 직접 연결이나 여러 종목 라우팅은 구현하지 않습니다. 대신 `--gateway`와 `--tcp` 실행 모드에서 단일 instrument 기준정보를 DB에서 읽어 `MatchingEngine` 생성자에 주입할 수 있게 합니다.
+
+### 입력
+
+psql TSV output smoke:
+
+```text
+1001	DEMO	10	70000	80000	OPEN	9
+```
+
+Gateway command smoke:
+
+```text
+SUBMIT seq=1 ref=9 order_id=300 instrument_id=1001 side=SELL type=LIMIT tif=DAY price=73700 quantity=2
+```
+
+### 변경 내용
+
+- `run_gateway()`와 `run_tcp_gateway()`가 `InstrumentReference`를 인자로 받도록 변경
+- `--gateway`에 `--load-reference-data --instrument-id <id>` 옵션 추가
+- `--tcp`에 `--load-reference-data --instrument-id <id>` 옵션 추가
+- gateway/TCP 모드에서 `--db-name`, `--db-user`, `--psql` 옵션 재사용
+- `--load-reference-data` 없이 기준정보 옵션만 지정하면 명시적으로 실패
+- loader 실패 시 `COMMAND_FAILED`, mapping error, detail을 stderr에 출력
+- `--help` usage에 gateway/TCP 기준정보 옵션 반영
+- README, architecture, protocol, recovery-design 문서에 gateway/TCP DB 기준정보 주입 경로 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./build/mini_ats --help
+./build/mini_ats --gateway --instrument-id 1001
+./build/mini_ats --tcp --port 0 --load-reference-data --instrument-id 1001 --psql definitely-missing-psql-binary
+printf '%s\n' 'SUBMIT seq=1 ref=9 order_id=300 instrument_id=1001 side=SELL type=LIMIT tif=DAY price=73700 quantity=2' \
+  | ./build/mini_ats --gateway --load-reference-data --instrument-id 1001 --psql /tmp/mini_ats_fake_psql --stats
+./build/mini_ats_unit_tests --gtest_filter=ReferenceDataTest.*:TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback
+ctest --test-dir build --output-on-failure
+git diff --check
+```
+
+### 출력
+
+`./build/mini_ats --help`
+
+```text
+Usage:
+  ./build/mini_ats              Run deterministic matching demo
+  ./build/mini_ats --gateway [--record-log <path>] [--stats]
+                         [--load-reference-data --instrument-id <id>]
+                         [--db-name <name>] [--db-user <user>] [--psql <path>]
+                         Read text commands from stdin
+                         Append accepted input commands and/or print stats
+  ./build/mini_ats --tcp --port <port> [--record-log <path>]
+                         [--market-data <addr> <port>] [--stats]
+                         [--load-reference-data --instrument-id <id>]
+                         [--db-name <name>] [--db-user <user>] [--psql <path>]
+                         Serve TCP orders and optionally publish market data
+```
+
+`./build/mini_ats --gateway --instrument-id 1001`
+
+```text
+reference data options require --load-reference-data
+```
+
+`./build/mini_ats --tcp --port 0 --load-reference-data --instrument-id 1001 --psql definitely-missing-psql-binary`
+
+```text
+failed to load reference data: COMMAND_FAILED detail=psql command failed
+```
+
+Fake psql 기반 gateway smoke:
+
+```text
+STATS commands_received=1 commands_accepted=1 commands_rejected=0 trades=0 traded_quantity=0 traded_notional=0 vwap=NONE latency_samples=1 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+ACCEPTED reason=NONE seq=1 command=SUBMIT detail=ACCEPTED trades=0 reports=1 report0_order_id=300 report0_instrument_id=1001 report0_type=ACCEPTED report0_status=ACCEPTED report0_filled_quantity=0 report0_remaining_quantity=2 report0_last_price=0 report0_last_quantity=0 report0_reject_reason=NONE report0_sequence=1
+```
+
+`./build/mini_ats_unit_tests --gtest_filter=ReferenceDataTest.*:TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback`
+
+```text
+[  PASSED  ] 9 tests.
+```
+
+`ctest --test-dir build --output-on-failure`
+
+```text
+100% tests passed, 0 tests failed out of 91
+
+The following tests did not run:
+	 32 - MarketDataPublisherTest.PublishesSingleDatagramOverLoopback (Skipped)
+	 84 - TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback (Skipped)
+```
+
+### 결과 판단
+
+성공입니다.
+
+- stdin gateway와 TCP gateway가 기본 demo 기준정보 대신 DB loader 결과를 matching engine에 주입할 수 있음
+- `ref=9` command가 fake psql의 `reference_version=9` 기준정보로 accepted됨
+- `--load-reference-data` 없이 DB 기준정보 옵션을 쓰는 실수를 명시적으로 차단함
+- TCP 모드에서도 loader 실패가 server listen 전에 명확한 오류로 반환됨
+- 전체 ctest는 91개 기준 89개 통과, UDP/TCP loopback 2개 sandbox skip
+- TCP loopback 단독 실행은 통과
+
+### 다음 단계
+
+다음 단계에서는 benchmark 결과 축적 또는 실제 PostgreSQL smoke를 추가합니다.
+
+- benchmark 결과를 파일로 기록하는 옵션 추가
+- `psql`/PostgreSQL 설치 환경에서 gateway/TCP end-to-end smoke 실행
+- libpq 기반 connection adapter 검토
+
+## 2026-06-09 24단계: Benchmark 결과 파일 기록 옵션 추가
+
+### 목표
+
+Deterministic benchmark runner의 한 줄 결과 payload를 파일에 축적할 수 있게 합니다.
+
+이번 단계에서는 별도 결과 DB나 JSON schema를 만들지 않습니다. 기존 canonical text payload를 stdout에 유지하면서, `--output <path>`가 지정된 경우 같은 한 줄을 파일 끝에 append합니다.
+
+### 입력
+
+Benchmark CLI:
+
+```bash
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_continue.log
+./build/mini_ats --benchmark --iterations 1 --output /tmp/mini_ats_benchmark_continue.log
+```
+
+실패 경로:
+
+```bash
+./build/mini_ats --benchmark --iterations 1 --output /tmp
+```
+
+### 변경 내용
+
+- `--benchmark` 모드에 `--output <path>` 옵션 추가
+- output 파일은 `std::ios::app`으로 열어 결과를 append
+- stdout benchmark payload 출력은 유지
+- output 파일 open 실패 시 benchmark 실행 전에 명시적 오류 반환
+- `scripts/run_benchmark.sh`가 실제 benchmark runner를 빌드 후 실행하도록 갱신
+- README, architecture, protocol, benchmark 문서에 결과 파일 기록 옵션 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_continue.log
+./build/mini_ats --benchmark --iterations 1 --output /tmp/mini_ats_benchmark_continue.log
+tail -n 2 /tmp/mini_ats_benchmark_continue.log
+./build/mini_ats --benchmark --iterations 1 --output /tmp
+./build/mini_ats_unit_tests
+ctest --test-dir build
+git diff --check
+```
+
+### 출력
+
+`tail -n 2 /tmp/mini_ats_benchmark_continue.log`
+
+```text
+BENCHMARK scenario=deterministic_gateway iterations=2 commands=6 elapsed_ns=<runtime> STATS commands_received=6 commands_accepted=4 commands_rejected=2 trades=2 traded_quantity=6 traded_notional=442200 vwap_notional=442200 vwap_quantity=6 vwap_floor_price=73700 latency_samples=6 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+BENCHMARK scenario=deterministic_gateway iterations=1 commands=3 elapsed_ns=<runtime> STATS commands_received=3 commands_accepted=2 commands_rejected=1 trades=1 traded_quantity=3 traded_notional=221100 vwap_notional=221100 vwap_quantity=3 vwap_floor_price=73700 latency_samples=3 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+```
+
+`./build/mini_ats --benchmark --iterations 1 --output /tmp`
+
+```text
+failed to open benchmark output: /tmp
+```
+
+`./build/mini_ats_unit_tests`
+
+```text
+[==========] Running 91 tests from 14 test suites.
+[  PASSED  ] 91 tests.
+```
+
+`ctest --test-dir build`
+
+```text
+100% tests passed, 0 tests failed out of 91
+
+The following tests did not run:
+	 32 - MarketDataPublisherTest.PublishesSingleDatagramOverLoopback (Skipped)
+	 84 - TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback (Skipped)
+```
+
+### 결과 판단
+
+성공입니다.
+
+- benchmark payload가 stdout에 계속 출력됨
+- `--output` 지정 시 같은 payload가 파일에 append됨
+- 반복 실행하면 파일 마지막에 실행 결과가 순서대로 쌓임
+- 디렉터리처럼 열 수 없는 output path는 명시적 오류로 실패함
+- 전체 unit test와 ctest가 통과함
+
+### 다음 단계
+
+다음 단계에서는 실제 PostgreSQL smoke 또는 결과 기록 포맷을 더 구조화합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 gateway/TCP end-to-end smoke 실행
+- benchmark 결과에 실행 환경 metadata를 함께 남기는 옵션 검토
+- libpq 기반 connection adapter 검토
+
+## 2026-06-09 25단계: Benchmark 실행 환경 metadata 출력
+
+### 목표
+
+Benchmark 결과 payload에 실행 환경 metadata를 포함해 여러 실행 결과를 비교할 수 있게 합니다.
+
+이번 단계에서는 별도 JSON이나 DB schema를 만들지 않고, 기존 `BENCHMARK ... STATS ...` 한 줄 형식을 유지합니다. 새 metadata는 `key=value` field로 추가합니다.
+
+### 입력
+
+Benchmark CLI:
+
+```bash
+./build/mini_ats --benchmark --iterations 1
+```
+
+### 변경 내용
+
+- `BenchmarkEnvironment` 추가
+- `collect_benchmark_environment()` 추가
+- compiler, C++ standard, build mode, OS, architecture, hardware thread count 수집
+- benchmark 결과 payload에 `commands_per_second_floor` 추가
+- deterministic benchmark unit test에 environment metadata 검증 추가
+- README, architecture, protocol, benchmark 문서에 metadata 출력 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./build/mini_ats_unit_tests --gtest_filter=DeterministicBenchmarkTest.*
+./build/mini_ats --benchmark --iterations 1
+./build/mini_ats_unit_tests
+ctest --test-dir build
+git diff --check
+```
+
+### 출력
+
+`./build/mini_ats_unit_tests --gtest_filter=DeterministicBenchmarkTest.*`
+
+```text
+[==========] Running 3 tests from 1 test suite.
+[ RUN      ] DeterministicBenchmarkTest.RunsFixedGatewayScenarioAndCollectsStats
+[       OK ] DeterministicBenchmarkTest.RunsFixedGatewayScenarioAndCollectsStats (0 ms)
+[ RUN      ] DeterministicBenchmarkTest.CollectsBenchmarkEnvironmentMetadata
+[       OK ] DeterministicBenchmarkTest.CollectsBenchmarkEnvironmentMetadata (0 ms)
+[ RUN      ] DeterministicBenchmarkTest.FormatsBenchmarkSummaryWithStatsPayload
+[       OK ] DeterministicBenchmarkTest.FormatsBenchmarkSummaryWithStatsPayload (0 ms)
+[  PASSED  ] 3 tests.
+```
+
+`./build/mini_ats --benchmark --iterations 1`
+
+```text
+BENCHMARK scenario=deterministic_gateway iterations=1 commands=3 elapsed_ns=<runtime> commands_per_second_floor=<throughput> compiler=gcc-13.3.0 cpp_standard=202002 build_mode=debug os=linux architecture=x86_64 hardware_threads=28 STATS commands_received=3 commands_accepted=2 commands_rejected=1 trades=1 traded_quantity=3 traded_notional=221100 vwap_notional=221100 vwap_quantity=3 vwap_floor_price=73700 latency_samples=3 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+```
+
+### 결과 판단
+
+성공입니다.
+
+- benchmark 결과 한 줄에 실행 환경 metadata가 포함됨
+- 기존 `STATS` payload와 deterministic scenario count는 유지됨
+- throughput은 command 수와 elapsed time 기준 floor 정수로 출력됨
+- output file append 옵션과 함께 쓰면 실행별 환경과 결과가 같은 줄에 함께 축적됨
+
+### 다음 단계
+
+다음 단계에서는 실제 PostgreSQL smoke 또는 결과 기록 포맷을 더 구조화합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 gateway/TCP end-to-end smoke 실행
+- benchmark 결과를 TSV/CSV로 변환하는 별도 script 검토
+- libpq 기반 connection adapter 검토
+
+## 2026-06-10 26단계: psql 기반 기준정보 loader와 gateway 주입 옵션 추가
+
+### 목표
+
+PostgreSQL의 `mini_ats.instruments` row를 실행 시점에 읽어 `MatchingEngine` 기준정보로 주입할 수 있게 합니다.
+
+이번 단계에서는 libpq 직접 연결 대신 `psql` 실행 파일을 사용하는 얇은 adapter를 둡니다. 테스트 환경에 PostgreSQL 서버가 없어도 parsing, command 생성, 오류 경계를 unit test로 검증할 수 있게 유지합니다.
+
+### 입력
+
+단일 instrument loader:
+
+```bash
+./build/mini_ats --load-instrument --instrument-id 1001
+```
+
+Gateway 기준정보 주입:
+
+```bash
+printf '%s\n' \
+  'SUBMIT seq=1 ref=7 order_id=10 instrument_id=1001 side=BUY type=LIMIT tif=DAY price=73500 quantity=10' \
+  | ./build/mini_ats --gateway --load-reference-data --instrument-id 1001
+```
+
+### 변경 내용
+
+- `PostgresInstrumentRepositoryConfig` 추가
+- `PostgresInstrumentLoadResult`와 `PostgresInstrumentLoadError` 추가
+- `instrument_reference_psql_query()` 추가
+- `build_psql_instrument_command()` 추가
+- `parse_psql_instrument_result()` 추가
+- `load_instrument_reference_from_postgres()` 추가
+- `format_instrument_reference()` 추가
+- `--load-instrument --instrument-id <id>` CLI 추가
+- `--gateway`와 `--tcp`에 `--load-reference-data --instrument-id <id>` 옵션 추가
+- `--db-name`, `--db-user`, `--psql` 옵션 추가
+- TCP gateway `--stats` 경로 추가
+- seed 기준정보 `reference_version`을 replay/gateway 예제와 같은 `7`로 조정
+- README, architecture, protocol, recovery-design 문서에 기준정보 loader 실행 경로 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./build/mini_ats_unit_tests
+./build/mini_ats --load-instrument --instrument-id 0
+./build/mini_ats --load-instrument --instrument-id 1001 --psql definitely-missing-psql-binary
+./build/mini_ats --gateway --load-reference-data --instrument-id 1001 --psql definitely-missing-psql-binary
+./build/mini_ats --benchmark --iterations 1
+```
+
+### 출력
+
+`./build/mini_ats_unit_tests`
+
+```text
+[==========] Running 92 tests from 14 test suites.
+[  PASSED  ] 92 tests.
+```
+
+`./build/mini_ats --load-instrument --instrument-id 0`
+
+```text
+invalid instrument id: 0
+```
+
+`./build/mini_ats --load-instrument --instrument-id 1001 --psql definitely-missing-psql-binary`
+
+```text
+failed to load instrument: COMMAND_FAILED detail=psql command failed
+```
+
+`./build/mini_ats --gateway --load-reference-data --instrument-id 1001 --psql definitely-missing-psql-binary`
+
+```text
+failed to load reference data: COMMAND_FAILED detail=psql command failed
+```
+
+`./build/mini_ats --benchmark --iterations 1`
+
+```text
+BENCHMARK scenario=deterministic_gateway iterations=1 commands=3 elapsed_ns=<runtime> commands_per_second_floor=<throughput> compiler=gcc-13.3.0 cpp_standard=202002 build_mode=debug os=linux architecture=x86_64 hardware_threads=28 STATS commands_received=3 commands_accepted=2 commands_rejected=1 trades=1 traded_quantity=3 traded_notional=221100 vwap_notional=221100 vwap_quantity=3 vwap_floor_price=73700 latency_samples=3 latency_min_ns=<runtime> latency_max_ns=<runtime> latency_p50_ns=<runtime> latency_p95_ns=<runtime> latency_p99_ns=<runtime>
+```
+
+### 결과 판단
+
+성공입니다.
+
+- psql 출력 한 줄을 `InstrumentReference`로 변환하는 경계를 추가함
+- psql command 생성 시 DB 이름, 사용자, psql 경로를 옵션으로 지정할 수 있음
+- stdin/TCP gateway가 기본 demo instrument 대신 DB에서 읽은 기준정보를 선택적으로 주입받을 수 있음
+- 잘못된 instrument id와 psql 실행 실패가 명시적 오류로 반환됨
+- 현재 로컬 환경에는 `psql`이 없어 실제 PostgreSQL smoke는 실행하지 못함
+- 기존 benchmark와 전체 unit test는 계속 통과함
+
+### 다음 단계
+
+다음 단계에서는 실제 PostgreSQL 환경 또는 구조화된 benchmark 기록 경로를 보강합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 `--load-instrument` 성공 smoke 실행
+- DB 기준정보를 주입한 stdin/TCP gateway end-to-end smoke 실행
+- benchmark 결과를 TSV/CSV로 변환하는 별도 script 추가
+- libpq 기반 connection adapter 검토
+
+## 2026-06-10 27단계: Benchmark payload TSV/CSV 변환 스크립트 추가
+
+### 목표
+
+여러 번 축적한 `BENCHMARK ... STATS ...` 한 줄 payload를 spreadsheet나 비교 도구에서 읽기 쉬운 표 형태로 변환합니다.
+
+이번 단계에서는 C++ benchmark runner의 출력 형식은 유지하고, 별도 Bash/AWK 스크립트를 추가합니다. 기본 출력은 TSV이며, 필요하면 CSV를 선택할 수 있게 합니다.
+
+### 입력
+
+Benchmark 결과 파일:
+
+```bash
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_table.log
+```
+
+변환 명령:
+
+```bash
+./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh --format csv /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh --no-header /tmp/mini_ats_benchmark_table.log
+```
+
+### 변경 내용
+
+- `scripts/benchmark_to_table.sh` 추가
+- `--format tsv|csv` 옵션 추가
+- `--no-header` 옵션 추가
+- 파일 인자가 없으면 stdin을 읽도록 구성
+- `BENCHMARK`/`STATS` marker를 제외하고 known `key=value` field를 stable column order로 출력
+- README, architecture, benchmark 문서에 변환 스크립트 사용법 반영
+
+### 실행 명령
+
+```bash
+chmod +x scripts/benchmark_to_table.sh
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh --format csv /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh --no-header /tmp/mini_ats_benchmark_table.log
+./scripts/benchmark_to_table.sh --format bad /tmp/mini_ats_benchmark_table.log
+```
+
+### 출력
+
+`./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_table.log`
+
+```text
+scenario	iterations	commands	elapsed_ns	commands_per_second_floor	compiler	cpp_standard	build_mode	os	architecture	hardware_threads	commands_received	commands_accepted	commands_rejected	trades	traded_quantity	traded_notional	vwap_notional	vwap_quantity	vwap_floor_price	latency_samples	latency_min_ns	latency_max_ns	latency_p50_ns	latency_p95_ns	latency_p99_ns
+deterministic_gateway	2	6	<runtime>	<throughput>	gcc-13.3.0	202002	debug	linux	x86_64	28	6	4	2	2	6	442200	442200	6	73700	6	<runtime>	<runtime>	<runtime>	<runtime>	<runtime>
+```
+
+`./scripts/benchmark_to_table.sh --format csv /tmp/mini_ats_benchmark_table.log`
+
+```text
+scenario,iterations,commands,elapsed_ns,commands_per_second_floor,compiler,cpp_standard,build_mode,os,architecture,hardware_threads,commands_received,commands_accepted,commands_rejected,trades,traded_quantity,traded_notional,vwap_notional,vwap_quantity,vwap_floor_price,latency_samples,latency_min_ns,latency_max_ns,latency_p50_ns,latency_p95_ns,latency_p99_ns
+deterministic_gateway,2,6,<runtime>,<throughput>,gcc-13.3.0,202002,debug,linux,x86_64,28,6,4,2,2,6,442200,442200,6,73700,6,<runtime>,<runtime>,<runtime>,<runtime>,<runtime>
+```
+
+`./scripts/benchmark_to_table.sh --format bad /tmp/mini_ats_benchmark_table.log`
+
+```text
+invalid format: bad
+```
+
+### 결과 판단
+
+성공입니다.
+
+- benchmark 결과 파일을 TSV와 CSV로 변환할 수 있음
+- header 포함/제외를 선택할 수 있음
+- stable column order를 유지하므로 여러 실행 결과를 append한 파일도 비교하기 쉬움
+- 잘못된 format 옵션은 명시적 오류로 거부함
+
+### 다음 단계
+
+다음 단계에서는 실제 PostgreSQL smoke 또는 benchmark 결과 분석 경로를 더 보강합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 `--load-instrument` 성공 smoke 실행
+- DB 기준정보를 주입한 stdin/TCP gateway end-to-end smoke 실행
+- benchmark TSV/CSV를 기준으로 간단한 summary script 추가
+- libpq 기반 connection adapter 검토
+
+## 2026-06-11 28단계: Benchmark table summary 스크립트 추가
+
+### 목표
+
+여러 번 축적한 benchmark 결과를 TSV/CSV table로 변환한 뒤, 전체 실행 row를 한 줄 summary로 집계합니다.
+
+이번 단계에서는 기존 `BENCHMARK ... STATS ...` payload 형식과 `benchmark_to_table.sh`는 유지하고, 변환된 table을 입력으로 받는 별도 summary 스크립트를 추가합니다.
+
+### 입력
+
+Benchmark 결과 파일:
+
+```bash
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_summary.log
+./build/mini_ats --benchmark --iterations 3 --output /tmp/mini_ats_benchmark_summary.log
+```
+
+TSV summary:
+
+```bash
+./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary.tsv
+./scripts/summarize_benchmark_table.sh /tmp/mini_ats_benchmark_summary.tsv
+```
+
+CSV summary:
+
+```bash
+./scripts/benchmark_to_table.sh --format csv /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary.csv
+./scripts/summarize_benchmark_table.sh --format csv /tmp/mini_ats_benchmark_summary.csv
+```
+
+### 변경 내용
+
+- `scripts/summarize_benchmark_table.sh` 추가
+- `--format tsv|csv` 옵션 추가
+- `--no-header` 옵션 추가
+- header가 있는 table은 column name 기준으로 읽고, `--no-header` 입력은 기존 stable column order 기준으로 읽도록 구성
+- 여러 row의 iterations, commands, elapsed time, trade count, 거래량, 거래대금, latency sample 수를 합산
+- throughput floor의 min/max/평균 floor와 row별 latency percentile 평균 floor 출력
+- README, architecture, benchmark 문서에 summary 스크립트 사용법 반영
+
+### 실행 명령
+
+```bash
+cmake --build build
+./scripts/summarize_benchmark_table.sh --help
+./build/mini_ats --benchmark --iterations 2 --output /tmp/mini_ats_benchmark_summary.log
+./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary.tsv
+./scripts/benchmark_to_table.sh --format csv /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary.csv
+./scripts/benchmark_to_table.sh --no-header /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary_no_header.tsv
+./scripts/summarize_benchmark_table.sh /tmp/mini_ats_benchmark_summary.tsv
+./scripts/summarize_benchmark_table.sh --format csv /tmp/mini_ats_benchmark_summary.csv
+./scripts/summarize_benchmark_table.sh --no-header /tmp/mini_ats_benchmark_summary_no_header.tsv
+./scripts/summarize_benchmark_table.sh --format bad
+./build/mini_ats --benchmark --iterations 3 --output /tmp/mini_ats_benchmark_summary.log
+./scripts/benchmark_to_table.sh /tmp/mini_ats_benchmark_summary.log > /tmp/mini_ats_benchmark_summary.tsv
+./scripts/summarize_benchmark_table.sh /tmp/mini_ats_benchmark_summary.tsv
+./build/mini_ats_unit_tests
+```
+
+### 출력
+
+`./scripts/summarize_benchmark_table.sh --help`
+
+```text
+Usage:
+  ./scripts/summarize_benchmark_table.sh [--format tsv|csv] [--no-header] [file...]
+
+Reads benchmark table rows from benchmark_to_table.sh and writes one aggregate summary.
+```
+
+단일 row TSV/CSV/header 없는 TSV summary는 모두 같은 형태로 출력되었습니다.
+
+```text
+SUMMARY rows=1 scenario=deterministic_gateway iterations_total=2 commands_total=6 elapsed_ns_total=1342812 commands_per_second_floor_min=4468 commands_per_second_floor_max=4468 commands_per_second_floor_avg_floor=4468 trades_total=2 traded_quantity_total=6 traded_notional_total=442200 vwap_floor_price=73700 latency_samples_total=6 latency_p50_ns_avg_floor=8277 latency_p95_ns_avg_floor=829622 latency_p99_ns_avg_floor=829622
+```
+
+잘못된 format 옵션:
+
+```text
+invalid format: bad
+```
+
+두 row 누적 summary:
+
+```text
+SUMMARY rows=2 scenario=deterministic_gateway iterations_total=5 commands_total=15 elapsed_ns_total=1809913 commands_per_second_floor_min=4468 commands_per_second_floor_max=19267 commands_per_second_floor_avg_floor=11867 trades_total=5 traded_quantity_total=15 traded_notional_total=1105500 vwap_floor_price=73700 latency_samples_total=15 latency_p50_ns_avg_floor=8265 latency_p95_ns_avg_floor=599386 latency_p99_ns_avg_floor=599386
+```
+
+`./build/mini_ats_unit_tests`
+
+```text
+[==========] Running 92 tests from 14 test suites.
+[  PASSED  ] 92 tests.
+```
+
+### 결과 판단
+
+성공입니다.
+
+- 기존 benchmark payload를 변경하지 않고 별도 table summary 경로를 추가함
+- TSV, CSV, header 없는 TSV 입력을 모두 처리함
+- 여러 benchmark 실행 row의 총 command/trade/notional과 throughput min/max/평균을 한 줄로 확인할 수 있음
+- latency percentile summary는 row별 percentile 값을 단순 평균한 값임을 문서에 명시함
+- 기존 C++ unit test 92개는 계속 통과함
+
+### 다음 단계
+
+다음 단계에서는 실제 PostgreSQL smoke 또는 DB connection 경계를 확장합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 `--load-instrument` 성공 smoke 실행
+- DB 기준정보를 주입한 stdin/TCP gateway end-to-end smoke 실행
+- libpq 기반 connection adapter 검토
+
+## 2026-06-11 29단계: 포트폴리오 완성도 정리
+
+### 목표
+
+기능 추가보다 포트폴리오 검토 경험을 정리합니다.
+
+지원 직무와 프로젝트의 연결, 현재 구현 범위, 검증 방법, 의도적으로 남긴 한계를 README 첫 화면에서 바로 파악할 수 있게 하고, 검토자가 볼 코드와 테스트를 별도 문서로 안내합니다.
+
+### 입력
+
+정리 기준:
+
+- 자동매매/예측/수익률 프로젝트가 아니라 매매체결 시스템 프로젝트임을 명확히 드러냄
+- 넥스트레이드 매매체결 IT 시스템 직무와 연결되는 역량을 상단에 배치
+- 빌드/테스트/간단 실행/benchmark 확인 경로를 짧게 유지
+- 실제 PostgreSQL smoke와 libpq adapter처럼 아직 남은 범위는 숨기지 않고 명시
+
+### 변경 내용
+
+- README를 포트폴리오 검토 흐름 중심으로 재구성
+- 직무 연결 표 추가
+- 현재 구현 범위와 의도적으로 남긴 범위 분리
+- quick verification, 실행 예시, PostgreSQL 기준정보, benchmark, 문서 링크 정리
+- `docs/reviewer-guide.md` 추가
+- `docs/matching-rules.md`의 오래된 1단계 표현 정리
+- `docs/architecture.md`의 모듈 제목 정리
+- `.gitignore` 추가/정리
+- GitHub Actions CMake build/test workflow 추가
+
+### 실행 명령
+
+```bash
+git diff --check
+./scripts/run_tests.sh
+```
+
+### 출력
+
+`git diff --check`
+
+```text
+<no output>
+```
+
+`./scripts/run_tests.sh`
+
+```text
+-- Configuring done
+-- Generating done
+-- Build files have been written to: .../build
+[100%] Built target mini_ats_unit_tests
+100% tests passed, 0 tests failed out of 92
+
+The following tests did not run:
+	 33 - MarketDataPublisherTest.PublishesSingleDatagramOverLoopback (Skipped)
+	 85 - TcpOrderServerTest.ProcessesLineDelimitedCommandsOverLoopback (Skipped)
+```
+
+### 결과 판단
+
+성공입니다.
+
+- README 첫 화면에서 프로젝트 목적, 직무 연결, 구현 범위, 한계가 분리되어 보임
+- 검토자 가이드에서 빠른 검증 명령, 핵심 코드, 핵심 테스트를 바로 찾을 수 있음
+- Docker 없이 Linux/CMake/GoogleTest 기준 CI workflow를 추가함
+- 빌드와 CTest 검증이 통과함
+
+### 다음 단계
+
+다음 단계에서는 실제 실행 환경 검증을 보강합니다.
+
+- `psql`/PostgreSQL 설치 환경에서 기준정보 load smoke
+- DB 기준정보 주입 gateway smoke
+- 필요 시 mock client/load generator를 작게 추가

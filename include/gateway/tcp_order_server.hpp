@@ -2,6 +2,7 @@
 
 #include "engine/matching_engine.hpp"
 #include "marketdata/market_data_publisher.hpp"
+#include "stats/operational_stats.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -38,7 +39,8 @@ public:
     explicit TcpOrderServer(engine::MatchingEngine& engine,
                             std::ostream* accepted_input_log = nullptr,
                             marketdata::UdpMarketDataPublisher* market_data_publisher = nullptr,
-                            std::size_t market_data_depth = 1) noexcept;
+                            std::size_t market_data_depth = 1,
+                            stats::OperationalStatistics* operational_stats = nullptr) noexcept;
     TcpOrderServer(const TcpOrderServer&) = delete;
     TcpOrderServer& operator=(const TcpOrderServer&) = delete;
     TcpOrderServer(TcpOrderServer&&) = delete;
@@ -58,6 +60,7 @@ private:
     std::ostream* accepted_input_log_{};
     marketdata::UdpMarketDataPublisher* market_data_publisher_{};
     std::size_t market_data_depth_{1};
+    stats::OperationalStatistics* operational_stats_{};
     int listen_fd_{-1};
 };
 

@@ -1,8 +1,8 @@
 # 체결 규칙
 
-이 문서는 Mini ATS Matching System에서 구현할 체결 규칙을 정리합니다. 현재 1단계에서는 규칙 문서만 존재하며, 실제 matching logic은 다음 단계부터 구현합니다.
+이 문서는 Mini ATS Matching System에서 구현한 체결 규칙을 정리합니다. 구현의 기준은 기능 수보다 체결 정확성, 결정성, 테스트 가능성입니다.
 
-## 초기 목표 규칙
+## 핵심 규칙
 
 - 가격-시간 우선 원칙을 적용합니다.
 - 지정가 주문과 시장가 주문을 지원합니다.
@@ -49,4 +49,4 @@ matching core는 결정적이어야 합니다. 같은 주문 입력 스트림을
 - FOK 주문은 주문 전체 수량을 즉시 체결할 수 있을 때만 주문장을 변경합니다. 유동성이 부족하면 체결 없이 거부합니다.
 - cancel request는 주문장에 남아 있는 resting order만 취소할 수 있습니다.
 
-TCP/UDP 프로토콜과 PostgreSQL 기준정보 연동은 이후 단계에서 구현합니다.
+TCP/UDP 프로토콜과 PostgreSQL 기준정보 adapter는 matching core 밖의 얇은 경계로 분리합니다. 체결 규칙 자체는 `engine` 모듈의 순수 in-memory state 전이에 집중합니다.
