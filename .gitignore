@@ -1,5 +1,6 @@
 # Build outputs
 build/
+build-*/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -32,3 +33,5 @@ accepted-input.log
 *.swo
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc

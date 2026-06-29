@@ -1,0 +1,636 @@
+:root {
+  color-scheme: dark;
+  --bg: #101113;
+  --panel: #181a1d;
+  --panel-strong: #202329;
+  --line: #30343b;
+  --line-soft: #252930;
+  --text: #edf0f4;
+  --muted: #9aa3ad;
+  --muted-strong: #c7cdd4;
+  --buy: #2fc27d;
+  --buy-soft: rgba(47, 194, 125, 0.16);
+  --sell: #e05b64;
+  --sell-soft: rgba(224, 91, 100, 0.16);
+  --amber: #d2a23a;
+  --cyan: #58b7c8;
+  --danger: #f06c77;
+  --radius: 8px;
+  --shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 18px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 14px;
+  max-width: 1480px;
+}
+
+.brand {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h1 {
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+h2 {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.top-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-pill {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: #15171a;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.status-pill.on {
+  border-color: rgba(47, 194, 125, 0.6);
+  color: #d7f8e8;
+  background: rgba(47, 194, 125, 0.12);
+}
+
+.status-pill.off {
+  border-color: rgba(224, 91, 100, 0.5);
+  color: #ffd9dc;
+  background: rgba(224, 91, 100, 0.12);
+}
+
+.status-pill.warn {
+  border-color: rgba(210, 162, 58, 0.5);
+  color: #ffe8ad;
+  background: rgba(210, 162, 58, 0.12);
+}
+
+.compact-field {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #15171a;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.compact-field input {
+  width: 78px;
+  height: 24px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  padding: 0 0 0 8px;
+  background: transparent;
+  color: var(--text);
+  outline: 0;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(360px, 1.2fr) minmax(300px, 0.9fr);
+  grid-template-areas:
+    "ticket book stats"
+    "ticket trades orders"
+    "ticket stream stream";
+  gap: 14px;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.ticket-panel {
+  grid-area: ticket;
+  align-self: start;
+}
+
+.book-panel {
+  grid-area: book;
+}
+
+.stats-panel {
+  grid-area: stats;
+}
+
+.trades-panel {
+  grid-area: trades;
+}
+
+.orders-panel {
+  grid-area: orders;
+}
+
+.stream-panel {
+  grid-area: stream;
+}
+
+.panel-header {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ticket-form,
+.cancel-form,
+.raw-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cancel-form,
+.raw-form {
+  border-top: 1px solid var(--line-soft);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #111316;
+}
+
+.segmented button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-strong);
+  font-weight: 700;
+}
+
+.segmented button.active {
+  color: var(--text);
+  background: var(--panel-strong);
+}
+
+.segmented button.buy.active {
+  background: var(--buy-soft);
+  color: #dbf8e9;
+}
+
+.segmented button.sell.active {
+  background: var(--sell-soft);
+  color: #ffe0e3;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #111316;
+  color: var(--text);
+  outline: 0;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--cyan);
+}
+
+.primary-action,
+.secondary-action,
+.icon-action {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.primary-action.buy-action {
+  border-color: rgba(47, 194, 125, 0.5);
+  background: var(--buy);
+  color: #071a11;
+}
+
+.primary-action.sell-action {
+  border-color: rgba(224, 91, 100, 0.5);
+  background: var(--sell);
+  color: #23090c;
+}
+
+.secondary-action:hover,
+.icon-action:hover {
+  border-color: var(--cyan);
+}
+
+.raw-form input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.message {
+  min-height: 36px;
+  margin: 0 14px 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  color: var(--muted-strong);
+  background: #131518;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.message.ok {
+  border-color: rgba(47, 194, 125, 0.5);
+  color: #dff8eb;
+}
+
+.message.error {
+  border-color: rgba(224, 91, 100, 0.5);
+  color: #ffdbde;
+}
+
+.book-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.book-summary div {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  background: var(--panel);
+}
+
+.book-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.book-summary strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.book-ladder {
+  padding: 12px 14px 14px;
+}
+
+.ladder-head,
+.level-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.ladder-head {
+  height: 28px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.levels {
+  display: grid;
+  gap: 6px;
+  min-height: 46px;
+}
+
+.level-row {
+  position: relative;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #121417;
+  font-variant-numeric: tabular-nums;
+}
+
+.level-row.empty {
+  color: var(--muted);
+}
+
+.level-fill {
+  position: absolute;
+  inset: 0;
+  width: var(--depth, 0%);
+  pointer-events: none;
+}
+
+.ask-levels .level-fill {
+  margin-left: auto;
+  background: var(--sell-soft);
+}
+
+.bid-levels .level-fill {
+  background: var(--buy-soft);
+}
+
+.level-row span {
+  position: relative;
+  z-index: 1;
+}
+
+.level-price.ask {
+  color: #ffb9bf;
+}
+
+.level-price.bid {
+  color: #bdf1d5;
+}
+
+.midline {
+  height: 1px;
+  margin: 10px 0;
+  background: var(--line);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.stat {
+  min-height: 78px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 14px;
+  background: var(--panel);
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat strong {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 310px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.side-buy {
+  color: var(--buy);
+}
+
+.side-sell {
+  color: var(--sell);
+}
+
+.open-orders,
+.stream-list {
+  display: grid;
+  max-height: 310px;
+  overflow: auto;
+}
+
+.order-row,
+.stream-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.order-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.order-main,
+.stream-main {
+  min-width: 0;
+}
+
+.order-title,
+.stream-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 750;
+}
+
+.order-title span,
+.stream-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-meta,
+.stream-raw {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.order-row button {
+  width: 74px;
+  height: 34px;
+  border: 1px solid rgba(224, 91, 100, 0.45);
+  border-radius: 6px;
+  background: rgba(224, 91, 100, 0.1);
+  color: #ffdce0;
+  font-weight: 750;
+}
+
+.stream-row.accepted {
+  border-left: 3px solid var(--buy);
+}
+
+.stream-row.rejected {
+  border-left: 3px solid var(--sell);
+}
+
+.empty-state {
+  padding: 20px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1180px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(300px, 360px) minmax(360px, 1fr);
+    grid-template-areas:
+      "ticket book"
+      "ticket stats"
+      "trades orders"
+      "stream stream";
+  }
+}
+
+@media (max-width: 780px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .top-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "ticket"
+      "book"
+      "stats"
+      "trades"
+      "orders"
+      "stream";
+  }
+
+  .form-grid,
+  .stats-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compact-field {
+    flex: 1 1 145px;
+  }
+
+  .compact-field input {
+    width: 100%;
+  }
+}

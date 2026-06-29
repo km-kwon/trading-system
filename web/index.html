@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mini ATS Trading Console</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="eyebrow">Mini ATS</span>
+          <h1>Trading Console</h1>
+        </div>
+        <div class="top-controls">
+          <div id="eventStatus" class="status-pill warn">Connecting</div>
+          <div id="engineStatus" class="status-pill off">Gateway Offline</div>
+          <label class="compact-field">
+            <span>Instrument</span>
+            <input id="instrumentId" inputmode="numeric" type="number" min="1" value="1001">
+          </label>
+          <label class="compact-field">
+            <span>Ref</span>
+            <input id="referenceVersion" inputmode="numeric" type="number" min="1" value="7">
+          </label>
+        </div>
+      </header>
+
+      <main class="dashboard-grid">
+        <section class="panel ticket-panel">
+          <div class="panel-header">
+            <h2>Order Ticket</h2>
+            <span id="nextIds" class="muted">seq - / order -</span>
+          </div>
+
+          <form id="orderForm" class="ticket-form">
+            <div class="segmented" aria-label="Side">
+              <button type="button" class="active buy" data-control="side" data-value="BUY">Buy</button>
+              <button type="button" class="sell" data-control="side" data-value="SELL">Sell</button>
+            </div>
+
+            <div class="segmented" aria-label="Order type">
+              <button type="button" class="active" data-control="orderType" data-value="LIMIT">Limit</button>
+              <button type="button" data-control="orderType" data-value="MARKET">Market</button>
+            </div>
+
+            <div class="form-grid">
+              <label>
+                <span>TIF</span>
+                <select id="timeInForce">
+                  <option value="DAY">DAY</option>
+                  <option value="IOC">IOC</option>
+                  <option value="FOK">FOK</option>
+                </select>
+              </label>
+              <label>
+                <span>Price</span>
+                <input id="price" inputmode="numeric" type="number" min="0" step="5" value="73700">
+              </label>
+              <label>
+                <span>Quantity</span>
+                <input id="quantity" inputmode="numeric" type="number" min="1" value="3">
+              </label>
+              <label>
+                <span>Order ID</span>
+                <input id="orderId" inputmode="numeric" type="number" min="1" placeholder="auto">
+              </label>
+            </div>
+
+            <button id="submitOrder" class="primary-action buy-action" type="submit">Submit Buy</button>
+          </form>
+
+          <form id="cancelForm" class="cancel-form">
+            <label>
+              <span>Cancel Order ID</span>
+              <input id="cancelOrderId" inputmode="numeric" type="number" min="1">
+            </label>
+            <button type="submit" class="secondary-action">Cancel</button>
+          </form>
+
+          <form id="rawForm" class="raw-form">
+            <label>
+              <span>Raw Command</span>
+              <input id="rawCommand" spellcheck="false" placeholder="SUBMIT seq=1 ref=7 ...">
+            </label>
+            <button type="submit" class="secondary-action">Send Raw</button>
+          </form>
+
+          <div id="message" class="message" aria-live="polite"></div>
+        </section>
+
+        <section class="panel book-panel">
+          <div class="panel-header">
+            <h2>Order Book</h2>
+            <span id="spread" class="muted">spread -</span>
+          </div>
+          <div class="book-summary">
+            <div>
+              <span>Best Bid</span>
+              <strong id="bestBid">-</strong>
+            </div>
+            <div>
+              <span>Best Ask</span>
+              <strong id="bestAsk">-</strong>
+            </div>
+          </div>
+          <div class="book-ladder">
+            <div class="ladder-head">
+              <span>Ask Qty</span>
+              <span>Ask Price</span>
+            </div>
+            <div id="asks" class="levels ask-levels"></div>
+            <div class="midline"></div>
+            <div id="bids" class="levels bid-levels"></div>
+            <div class="ladder-head">
+              <span>Bid Qty</span>
+              <span>Bid Price</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel stats-panel">
+          <div class="panel-header">
+            <h2>Session Stats</h2>
+            <span id="vwap" class="muted">VWAP -</span>
+          </div>
+          <div id="statsGrid" class="stats-grid"></div>
+        </section>
+
+        <section class="panel trades-panel">
+          <div class="panel-header">
+            <h2>Trade Tape</h2>
+            <span id="tradeCount" class="muted">0 trades</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Seq</th>
+                  <th>Side</th>
+                  <th>Price</th>
+                  <th>Qty</th>
+                  <th>Incoming</th>
+                </tr>
+              </thead>
+              <tbody id="tradesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel orders-panel">
+          <div class="panel-header">
+            <h2>Open Orders</h2>
+            <span id="openOrderCount" class="muted">0 open</span>
+          </div>
+          <div id="openOrders" class="open-orders"></div>
+        </section>
+
+        <section class="panel stream-panel">
+          <div class="panel-header">
+            <h2>Gateway Stream</h2>
+            <button id="refreshSnapshot" class="icon-action" type="button" title="Refresh snapshot">Refresh</button>
+          </div>
+          <div id="responseStream" class="stream-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

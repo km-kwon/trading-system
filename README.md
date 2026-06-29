@@ -114,6 +114,21 @@ TCP gateway에서 UDP market data publish를 함께 켜기:
 ./build/mini_ats --tcp --port 9001 --record-log accepted-input.log --market-data 127.0.0.1 9100
 ```
 
+웹 콘솔 실행:
+
+```bash
+python3 web/bridge.py --start-engine
+```
+
+브라우저에서 `http://127.0.0.1:8080`을 열면 주문 입력, 호가, 체결, open order, gateway 응답을 한 화면에서 볼 수 있습니다. 이 명령은 bridge가 `./build/mini_ats --tcp --port 9001 --market-data 127.0.0.1 9100 --stats`를 자식 프로세스로 함께 실행합니다.
+
+엔진을 직접 띄우고 웹 콘솔만 따로 붙일 수도 있습니다.
+
+```bash
+./build/mini_ats --tcp --port 9001 --market-data 127.0.0.1 9100 --stats
+python3 web/bridge.py
+```
+
 ## PostgreSQL 기준정보
 
 `MINI_ATS_DB_NAME`과 `MINI_ATS_DB_USER`를 지정하지 않으면 각각 `mini_ats`, 현재 Linux 사용자를 사용합니다.
