@@ -30,6 +30,12 @@ from urllib.parse import unquote, urlparse
 WEB_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = WEB_ROOT.parent
 DEFAULT_ENGINE = REPO_ROOT / "build" / "mini_ats"
+DEFAULT_REFERENCE_SYMBOL = "DEMO"
+DEFAULT_TICK_SIZE = 5
+DEFAULT_LOWER_PRICE_LIMIT = 70000
+DEFAULT_UPPER_PRICE_LIMIT = 80000
+DEFAULT_MARKET_SESSION = "OPEN"
+GATEWAY_HEALTH_CACHE_SECONDS = 0.5
 
 
 class BridgeError(Exception):
@@ -230,6 +236,8 @@ class MiniAtsBridge:
             "tradedQuantity": 0,
             "tradedNotional": 0,
         }
+        self._gateway_connected_cache = False
+        self._gateway_connected_checked_at = 0.0
         self._engine_process: subprocess.Popen[str] | None = None
         self._udp_thread: threading.Thread | None = None
 
@@ -253,7 +261,7 @@ class MiniAtsBridge:
         process_running = process is not None and process.poll() is None
         return {
             "bridge": "OK",
-            "engineConnected": self._can_connect_gateway(),
+            "engineConnected": self._can_connect_gateway_cached(),
             "engineManaged": self.start_engine,
             "engineRunning": process_running if process is not None else None,
             "gatewayHost": self.gateway_host,
@@ -263,16 +271,33 @@ class MiniAtsBridge:
         }
 
     def snapshot(self) -> dict[str, Any]:
+        health = self.health()
         with self._lock:
+            book = {
+                "instrumentId": self._book.get("instrumentId"),
+                "bestBid": dict(self._book["bestBid"]) if self._book.get("bestBid") else None,
+                "bestAsk": dict(self._book["bestAsk"]) if self._book.get("bestAsk") else None,
+                "bids": [dict(level) for level in self._book.get("bids", [])],
+                "asks": [dict(level) for level in self._book.get("asks", [])],
+            }
             return {
-                "health": self.health(),
+                "health": health,
                 "defaults": {
                     "instrumentId": self.default_instrument_id,
                     "referenceVersion": self.default_reference_version,
                 },
+                "referenceData": {
+                    "instrumentId": self.default_instrument_id,
+                    "symbol": DEFAULT_REFERENCE_SYMBOL,
+                    "tickSize": DEFAULT_TICK_SIZE,
+                    "lowerPriceLimit": DEFAULT_LOWER_PRICE_LIMIT,
+                    "upperPriceLimit": DEFAULT_UPPER_PRICE_LIMIT,
+                    "session": DEFAULT_MARKET_SESSION,
+                    "referenceVersion": self.default_reference_version,
+                },
                 "nextSequence": self._next_sequence,
                 "nextOrderId": self._next_order_id,
-                "book": json.loads(json.dumps(self._book)),
+                "book": book,
                 "trades": list(self._trades),
                 "responses": list(self._responses),
                 "commands": list(self._commands),
@@ -594,6 +619,8 @@ class MiniAtsBridge:
                 self._log_engine(f"Engine exited with code {self._engine_process.returncode}")
                 return
             if self._can_connect_gateway():
+                self._gateway_connected_cache = True
+                self._gateway_connected_checked_at = time.monotonic()
                 self._log_engine(
                     f"Engine TCP gateway reachable at {self.gateway_host}:{self.gateway_port}"
                 )
@@ -625,6 +652,16 @@ class MiniAtsBridge:
                 return True
         except OSError:
             return False
+
+    def _can_connect_gateway_cached(self) -> bool:
+        now = time.monotonic()
+        if now - self._gateway_connected_checked_at < GATEWAY_HEALTH_CACHE_SECONDS:
+            return self._gateway_connected_cache
+
+        connected = self._can_connect_gateway()
+        self._gateway_connected_cache = connected
+        self._gateway_connected_checked_at = now
+        return connected
 
     @staticmethod
     def _enum(

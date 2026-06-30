@@ -79,14 +79,6 @@
             <button type="submit" class="secondary-action">Cancel</button>
           </form>
 
-          <form id="rawForm" class="raw-form">
-            <label>
-              <span>Raw Command</span>
-              <input id="rawCommand" spellcheck="false" placeholder="SUBMIT seq=1 ref=7 ...">
-            </label>
-            <button type="submit" class="secondary-action">Send Raw</button>
-          </form>
-
           <div id="message" class="message" aria-live="polite"></div>
         </section>
 
@@ -105,6 +97,23 @@
               <strong id="bestAsk">-</strong>
             </div>
           </div>
+          <div class="book-depth-summary">
+            <div>
+              <span>Bid Orders</span>
+              <strong id="bidOrderCount">0</strong>
+              <em id="bidDepthTotal">qty 0</em>
+            </div>
+            <div>
+              <span>Pressure</span>
+              <strong id="bookPressure">-</strong>
+              <em id="bookPressureDetail">bid 0 / ask 0</em>
+            </div>
+            <div>
+              <span>Ask Orders</span>
+              <strong id="askOrderCount">0</strong>
+              <em id="askDepthTotal">qty 0</em>
+            </div>
+          </div>
           <div class="book-ladder">
             <div class="ladder-head">
               <span>Ask Qty</span>
@@ -118,6 +127,30 @@
               <span>Bid Price</span>
             </div>
           </div>
+          <div class="resting-book">
+            <div class="resting-side">
+              <div class="resting-head">
+                <span>Resting Buys</span>
+                <span>Price / Qty</span>
+              </div>
+              <div id="activeBidOrders" class="resting-orders bid-orders"></div>
+            </div>
+            <div class="resting-side">
+              <div class="resting-head">
+                <span>Resting Sells</span>
+                <span>Price / Qty</span>
+              </div>
+              <div id="activeAskOrders" class="resting-orders ask-orders"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel reference-panel">
+          <div class="panel-header">
+            <h2>Reference Data</h2>
+            <span id="referenceSymbol" class="muted">-</span>
+          </div>
+          <div id="referenceGrid" class="reference-grid"></div>
         </section>
 
         <section class="panel stats-panel">

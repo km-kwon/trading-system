@@ -129,6 +129,9 @@ python3 web/bridge.py --start-engine
 python3 web/bridge.py
 ```
 
+Cloudflare Pages preview 배포는 정적 UI와 Pages Functions만 올리고, local bridge와 C++ engine은 WSL에서 실행한 뒤 Cloudflare Tunnel로 연결합니다.
+운영/재배포 절차는 [운영 Runbook](docs/operations.md)을 참고하세요.
+
 ## PostgreSQL 기준정보
 
 `MINI_ATS_DB_NAME`과 `MINI_ATS_DB_USER`를 지정하지 않으면 각각 `mini_ats`, 현재 Linux 사용자를 사용합니다.
@@ -203,6 +206,8 @@ TSV/CSV 변환:
 - [OrderBook 상태 읽기](docs/orderbook-state.md)
 - [검토자 가이드](docs/reviewer-guide.md)
 - [개발 기록](docs/development-log.md)
+- [운영 Runbook](docs/operations.md)
+- [면접 설명 가이드](docs/interview-guide.md)
 
 ## 디렉터리 구조
 

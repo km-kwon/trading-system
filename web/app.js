@@ -4,6 +4,8 @@ const state = {
   orderType: "LIMIT",
   eventSource: null,
   settingsInitialized: false,
+  renderScheduled: false,
+  htmlCache: new Map(),
 };
 
 const els = {
@@ -14,20 +16,28 @@ const els = {
   nextIds: document.querySelector("#nextIds"),
   orderForm: document.querySelector("#orderForm"),
   cancelForm: document.querySelector("#cancelForm"),
-  rawForm: document.querySelector("#rawForm"),
   timeInForce: document.querySelector("#timeInForce"),
   price: document.querySelector("#price"),
   quantity: document.querySelector("#quantity"),
   orderId: document.querySelector("#orderId"),
   cancelOrderId: document.querySelector("#cancelOrderId"),
-  rawCommand: document.querySelector("#rawCommand"),
   submitOrder: document.querySelector("#submitOrder"),
   message: document.querySelector("#message"),
   bestBid: document.querySelector("#bestBid"),
   bestAsk: document.querySelector("#bestAsk"),
   spread: document.querySelector("#spread"),
+  bidOrderCount: document.querySelector("#bidOrderCount"),
+  askOrderCount: document.querySelector("#askOrderCount"),
+  bidDepthTotal: document.querySelector("#bidDepthTotal"),
+  askDepthTotal: document.querySelector("#askDepthTotal"),
+  bookPressure: document.querySelector("#bookPressure"),
+  bookPressureDetail: document.querySelector("#bookPressureDetail"),
+  referenceSymbol: document.querySelector("#referenceSymbol"),
+  referenceGrid: document.querySelector("#referenceGrid"),
   asks: document.querySelector("#asks"),
   bids: document.querySelector("#bids"),
+  activeBidOrders: document.querySelector("#activeBidOrders"),
+  activeAskOrders: document.querySelector("#activeAskOrders"),
   statsGrid: document.querySelector("#statsGrid"),
   vwap: document.querySelector("#vwap"),
   tradeCount: document.querySelector("#tradeCount"),
@@ -39,6 +49,9 @@ const els = {
 };
 
 const numberFormat = new Intl.NumberFormat("en-US");
+const scheduleFrame = window.requestAnimationFrame
+  ? (callback) => window.requestAnimationFrame(callback)
+  : (callback) => window.setTimeout(callback, 16);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -83,6 +96,26 @@ function setMessage(text, kind = "") {
   els.message.className = `message ${kind}`.trim();
 }
 
+function setText(element, text) {
+  const next = String(text ?? "");
+  if (element.textContent !== next) {
+    element.textContent = next;
+  }
+}
+
+function setClassName(element, className) {
+  if (element.className !== className) {
+    element.className = className;
+  }
+}
+
+function setHtml(cacheKey, element, html) {
+  if (state.htmlCache.get(cacheKey) !== html) {
+    element.innerHTML = html;
+    state.htmlCache.set(cacheKey, html);
+  }
+}
+
 function getSettings() {
   return {
     instrumentId: Number(els.instrumentId.value),
@@ -113,7 +146,29 @@ function applySnapshot(snapshot) {
     els.referenceVersion.value = snapshot.defaults.referenceVersion ?? 7;
     state.settingsInitialized = true;
   }
-  render();
+  scheduleRender();
+}
+
+function scheduleRender() {
+  if (state.renderScheduled) {
+    return;
+  }
+  state.renderScheduled = true;
+  scheduleFrame(() => {
+    state.renderScheduled = false;
+    render();
+  });
+}
+
+function pollSnapshotWhenDisconnected() {
+  if (!state.eventSource || state.eventSource.readyState !== EventSource.OPEN) {
+    fetchSnapshot();
+  }
+}
+
+function updateEventStatus(text, className) {
+  setText(els.eventStatus, text);
+  setClassName(els.eventStatus, className);
 }
 
 function render() {
@@ -122,65 +177,202 @@ function render() {
     return;
   }
   renderStatus(snapshot);
-  renderBook(snapshot.book || {});
+  renderReferenceData(snapshot.referenceData || {}, snapshot.defaults || {});
+  renderBook(snapshot.book || {}, snapshot.openOrders || []);
   renderStats(snapshot.stats || {});
   renderTrades(snapshot.trades || []);
   renderOpenOrders(snapshot.openOrders || []);
   renderResponses(snapshot.responses || []);
-  els.nextIds.textContent = `seq ${snapshot.nextSequence ?? "-"} / order ${snapshot.nextOrderId ?? "-"}`;
+  setText(els.nextIds, `seq ${snapshot.nextSequence ?? "-"} / order ${snapshot.nextOrderId ?? "-"}`);
 }
 
 function renderStatus(snapshot) {
   const health = snapshot.health || {};
   const online = Boolean(health.engineConnected);
-  els.engineStatus.textContent = online ? "Gateway Online" : "Gateway Offline";
-  els.engineStatus.className = `status-pill ${online ? "on" : "off"}`;
+  setText(els.engineStatus, online ? "Gateway Online" : "Gateway Offline");
+  setClassName(els.engineStatus, `status-pill ${online ? "on" : "off"}`);
 }
 
-function renderBook(book) {
+function renderReferenceData(referenceData, defaults) {
+  const instrumentId = referenceData.instrumentId ?? defaults.instrumentId;
+  const referenceVersion = referenceData.referenceVersion ?? defaults.referenceVersion;
+  const symbol = referenceData.symbol || "-";
+  const priceBand = referenceData.lowerPriceLimit && referenceData.upperPriceLimit
+    ? `${formatPrice(referenceData.lowerPriceLimit)} - ${formatPrice(referenceData.upperPriceLimit)}`
+    : "-";
+  const rows = [
+    ["Instrument", instrumentId ? `#${instrumentId}` : "-"],
+    ["Tick Size", referenceData.tickSize ?? "-"],
+    ["Price Band", priceBand],
+    ["Session", referenceData.session || "-"],
+    ["Ref Version", referenceVersion ?? "-"],
+  ];
+
+  setText(els.referenceSymbol, symbol);
+  setHtml(
+    "referenceGrid",
+    els.referenceGrid,
+    rows
+      .map(
+        ([label, value]) => `
+        <div class="reference-item">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `,
+      )
+      .join(""),
+  );
+}
+
+function renderBook(book, openOrders) {
   const bestBid = book.bestBid;
   const bestAsk = book.bestAsk;
-  els.bestBid.textContent = bestBid ? formatPrice(bestBid.price) : "-";
-  els.bestAsk.textContent = bestAsk ? formatPrice(bestAsk.price) : "-";
+  setText(els.bestBid, bestBid ? formatPrice(bestBid.price) : "-");
+  setText(els.bestAsk, bestAsk ? formatPrice(bestAsk.price) : "-");
 
   if (bestBid && bestAsk) {
-    els.spread.textContent = `spread ${formatNumber(Number(bestAsk.price) - Number(bestBid.price))}`;
+    setText(els.spread, `spread ${formatNumber(Number(bestAsk.price) - Number(bestBid.price))}`);
   } else {
-    els.spread.textContent = "spread -";
+    setText(els.spread, "spread -");
   }
 
   const levels = [...(book.bids || []), ...(book.asks || [])];
   const maxQuantity = Math.max(1, ...levels.map((level) => Number(level.quantity || 0)));
   renderLevels(els.asks, book.asks || [], "ask", maxQuantity);
   renderLevels(els.bids, book.bids || [], "bid", maxQuantity);
+  renderRestingBook(openOrders);
 }
 
 function renderLevels(container, levels, side, maxQuantity) {
   if (!levels.length) {
-    container.innerHTML = `<div class="level-row empty"><span>No ${side}s</span><span>-</span></div>`;
+    setHtml(
+      `levels-${side}`,
+      container,
+      `<div class="level-row empty"><span>No ${side}s</span><span>-</span></div>`,
+    );
     return;
   }
 
-  container.innerHTML = levels
-    .map((level) => {
-      const quantity = Number(level.quantity || 0);
-      const depth = Math.max(4, Math.min(100, (quantity / maxQuantity) * 100));
-      return `
+  setHtml(
+    `levels-${side}`,
+    container,
+    levels
+      .map((level) => {
+        const quantity = Number(level.quantity || 0);
+        const depth = Math.max(4, Math.min(100, (quantity / maxQuantity) * 100));
+        return `
         <div class="level-row">
           <div class="level-fill" style="--depth: ${depth}%"></div>
           <span>${formatNumber(quantity)}</span>
           <span class="level-price ${side}">${formatPrice(level.price)}</span>
         </div>
       `;
-    })
-    .join("");
+      })
+      .join(""),
+  );
+}
+
+function orderRemaining(order) {
+  return Number(order.remainingQuantity ?? order.quantity ?? 0);
+}
+
+function orderPrice(order, fallback = 0) {
+  if (order.orderType === "MARKET" || order.price === null || order.price === undefined) {
+    return fallback;
+  }
+  return Number(order.price);
+}
+
+function sortRestingOrders(orders, side) {
+  return [...orders].sort((a, b) => {
+    const priceA = orderPrice(a, side === "BUY" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+    const priceB = orderPrice(b, side === "BUY" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+    if (priceA !== priceB) {
+      return side === "BUY" ? priceB - priceA : priceA - priceB;
+    }
+    return Number(a.sequence || 0) - Number(b.sequence || 0);
+  });
+}
+
+function sortOpenOrdersForPanel(orders) {
+  return [...orders].sort((a, b) => {
+    const sideA = a.side === "BUY" ? 0 : 1;
+    const sideB = b.side === "BUY" ? 0 : 1;
+    if (sideA !== sideB) {
+      return sideA - sideB;
+    }
+    const priceA = orderPrice(a, a.side === "BUY" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+    const priceB = orderPrice(b, b.side === "BUY" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+    if (priceA !== priceB) {
+      return a.side === "BUY" ? priceB - priceA : priceA - priceB;
+    }
+    return Number(a.sequence || 0) - Number(b.sequence || 0);
+  });
+}
+
+function renderRestingBook(openOrders) {
+  const activeOrders = (openOrders || []).filter((order) => orderRemaining(order) > 0);
+  const buyOrders = sortRestingOrders(
+    activeOrders.filter((order) => order.side === "BUY"),
+    "BUY",
+  );
+  const sellOrders = sortRestingOrders(
+    activeOrders.filter((order) => order.side === "SELL"),
+    "SELL",
+  );
+  const bidQty = buyOrders.reduce((sum, order) => sum + orderRemaining(order), 0);
+  const askQty = sellOrders.reduce((sum, order) => sum + orderRemaining(order), 0);
+  const pressure = bidQty + askQty > 0 ? Math.round((bidQty / (bidQty + askQty)) * 100) : null;
+  const maxOrderQty = Math.max(1, ...activeOrders.map(orderRemaining));
+
+  setText(els.bidOrderCount, formatNumber(buyOrders.length));
+  setText(els.askOrderCount, formatNumber(sellOrders.length));
+  setText(els.bidDepthTotal, `qty ${formatNumber(bidQty)}`);
+  setText(els.askDepthTotal, `qty ${formatNumber(askQty)}`);
+  setText(els.bookPressure, pressure === null ? "-" : `${pressure}% bid`);
+  setText(els.bookPressureDetail, `bid ${formatNumber(bidQty)} / ask ${formatNumber(askQty)}`);
+  renderRestingOrders(els.activeBidOrders, buyOrders, "bid", maxOrderQty);
+  renderRestingOrders(els.activeAskOrders, sellOrders, "ask", maxOrderQty);
+}
+
+function renderRestingOrders(container, orders, side, maxOrderQty) {
+  if (!orders.length) {
+    setHtml(
+      `resting-${side}`,
+      container,
+      `<div class="resting-order-row empty"><span>No ${side === "bid" ? "buy" : "sell"} orders</span><span>-</span></div>`,
+    );
+    return;
+  }
+
+  setHtml(
+    `resting-${side}`,
+    container,
+    orders
+      .slice(0, 80)
+      .map((order) => {
+        const remaining = orderRemaining(order);
+        const depth = Math.max(5, Math.min(100, (remaining / maxOrderQty) * 100));
+        const price = order.orderType === "MARKET" ? "MKT" : formatPrice(order.price);
+        return `
+        <div class="resting-order-row">
+          <div class="level-fill" style="--depth: ${depth}%"></div>
+          <span class="resting-order-id">#${escapeHtml(order.orderId)}</span>
+          <span class="resting-price ${side}">${escapeHtml(price)}</span>
+          <strong>${formatNumber(remaining)}</strong>
+        </div>
+      `;
+      })
+      .join(""),
+  );
 }
 
 function renderStats(stats) {
   const tradedQuantity = Number(stats.tradedQuantity || 0);
   const tradedNotional = Number(stats.tradedNotional || 0);
   const vwap = tradedQuantity > 0 ? Math.floor(tradedNotional / tradedQuantity) : null;
-  els.vwap.textContent = `VWAP ${formatPrice(vwap)}`;
+  setText(els.vwap, `VWAP ${formatPrice(vwap)}`);
 
   const rows = [
     ["Commands", stats.commands || 0],
@@ -191,31 +383,38 @@ function renderStats(stats) {
     ["Notional", tradedNotional],
   ];
 
-  els.statsGrid.innerHTML = rows
-    .map(
-      ([label, value]) => `
+  setHtml(
+    "statsGrid",
+    els.statsGrid,
+    rows
+      .map(
+        ([label, value]) => `
         <div class="stat">
           <span>${escapeHtml(label)}</span>
           <strong>${formatNumber(value)}</strong>
         </div>
       `,
-    )
-    .join("");
+      )
+      .join(""),
+  );
 }
 
 function renderTrades(trades) {
-  els.tradeCount.textContent = `${trades.length} trades`;
+  setText(els.tradeCount, `${trades.length} trades`);
   if (!trades.length) {
-    els.tradesBody.innerHTML = `<tr><td colspan="5" class="empty-state">No trades</td></tr>`;
+    setHtml("tradesBody", els.tradesBody, `<tr><td colspan="5" class="empty-state">No trades</td></tr>`);
     return;
   }
 
-  els.tradesBody.innerHTML = trades
-    .slice(0, 80)
-    .map((trade) => {
-      const side = trade.aggressorSide;
-      const sideClass = side === "BUY" ? "side-buy" : side === "SELL" ? "side-sell" : "";
-      return `
+  setHtml(
+    "tradesBody",
+    els.tradesBody,
+    trades
+      .slice(0, 80)
+      .map((trade) => {
+        const side = trade.aggressorSide;
+        const sideClass = side === "BUY" ? "side-buy" : side === "SELL" ? "side-sell" : "";
+        return `
         <tr>
           <td>${escapeHtml(trade.sequence ?? "-")}</td>
           <td class="${sideClass}">${escapeHtml(formatSide(side))}</td>
@@ -224,22 +423,26 @@ function renderTrades(trades) {
           <td>${escapeHtml(trade.incomingOrderId ?? "-")}</td>
         </tr>
       `;
-    })
-    .join("");
+      })
+      .join(""),
+  );
 }
 
 function renderOpenOrders(orders) {
-  els.openOrderCount.textContent = `${orders.length} open`;
+  setText(els.openOrderCount, `${orders.length} open`);
   if (!orders.length) {
-    els.openOrders.innerHTML = `<div class="empty-state">No open orders</div>`;
+    setHtml("openOrders", els.openOrders, `<div class="empty-state">No open orders</div>`);
     return;
   }
 
-  els.openOrders.innerHTML = orders
-    .map((order) => {
-      const sideClass = order.side === "BUY" ? "side-buy" : "side-sell";
-      const price = order.orderType === "MARKET" ? "MKT" : formatPrice(order.price);
-      return `
+  setHtml(
+    "openOrders",
+    els.openOrders,
+    sortOpenOrdersForPanel(orders)
+      .map((order) => {
+        const sideClass = order.side === "BUY" ? "side-buy" : "side-sell";
+        const price = order.orderType === "MARKET" ? "MKT" : formatPrice(order.price);
+        return `
         <div class="order-row">
           <div class="order-main">
             <div class="order-title">
@@ -254,23 +457,27 @@ function renderOpenOrders(orders) {
           <button type="button" data-cancel-order="${escapeHtml(order.orderId)}">Cancel</button>
         </div>
       `;
-    })
-    .join("");
+      })
+      .join(""),
+  );
 }
 
 function renderResponses(responses) {
   if (!responses.length) {
-    els.responseStream.innerHTML = `<div class="empty-state">No gateway responses</div>`;
+    setHtml("responseStream", els.responseStream, `<div class="empty-state">No gateway responses</div>`);
     return;
   }
 
-  els.responseStream.innerHTML = responses
-    .slice(0, 80)
-    .map((response) => {
-      const accepted = response.status === "ACCEPTED";
-      const label = accepted ? "accepted" : "rejected";
-      const detail = response.detail && response.detail !== "NONE" ? response.detail : response.reason;
-      return `
+  setHtml(
+    "responseStream",
+    els.responseStream,
+    responses
+      .slice(0, 80)
+      .map((response) => {
+        const accepted = response.status === "ACCEPTED";
+        const label = accepted ? "accepted" : "rejected";
+        const detail = response.detail && response.detail !== "NONE" ? response.detail : response.reason;
+        return `
         <div class="stream-row ${label}">
           <div class="stream-main">
             <div class="stream-title">
@@ -283,8 +490,9 @@ function renderResponses(responses) {
           </div>
         </div>
       `;
-    })
-    .join("");
+      })
+      .join(""),
+  );
 }
 
 async function submitOrder(event) {
@@ -324,11 +532,6 @@ async function cancelOrderId(orderId) {
   els.cancelOrderId.value = "";
 }
 
-async function sendRaw(event) {
-  event.preventDefault();
-  await sendAction(() => api("/api/raw", { command: els.rawCommand.value }));
-}
-
 async function sendAction(action) {
   setMessage("Sending...", "");
   setBusy(true);
@@ -360,8 +563,8 @@ async function fetchSnapshot() {
     const snapshot = await response.json();
     applySnapshot(snapshot);
   } catch (error) {
-    els.engineStatus.textContent = "Bridge Offline";
-    els.engineStatus.className = "status-pill off";
+    setText(els.engineStatus, "Bridge Offline");
+    setClassName(els.engineStatus, "status-pill off");
   }
 }
 
@@ -373,13 +576,11 @@ function connectEvents() {
   state.eventSource = source;
 
   source.onopen = () => {
-    els.eventStatus.textContent = "Live";
-    els.eventStatus.className = "status-pill on";
+    updateEventStatus("Live", "status-pill on");
   };
 
   source.onerror = () => {
-    els.eventStatus.textContent = "Reconnecting";
-    els.eventStatus.className = "status-pill warn";
+    updateEventStatus("Reconnecting", "status-pill warn");
   };
 
   source.onmessage = (event) => {
@@ -402,7 +603,6 @@ document.querySelectorAll("[data-control]").forEach((button) => {
 
 els.orderForm.addEventListener("submit", submitOrder);
 els.cancelForm.addEventListener("submit", cancelOrder);
-els.rawForm.addEventListener("submit", sendRaw);
 els.refreshSnapshot.addEventListener("click", fetchSnapshot);
 
 els.openOrders.addEventListener("click", (event) => {
@@ -417,4 +617,4 @@ setControl("side", "BUY");
 setControl("orderType", "LIMIT");
 fetchSnapshot();
 connectEvents();
-setInterval(fetchSnapshot, 5000);
+setInterval(pollSnapshotWhenDisconnected, 5000);

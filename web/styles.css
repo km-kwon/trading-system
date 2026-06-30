@@ -157,6 +157,7 @@ h2 {
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(360px, 1.2fr) minmax(300px, 0.9fr);
   grid-template-areas:
+    "ticket book reference"
     "ticket book stats"
     "ticket trades orders"
     "ticket stream stream";
@@ -184,6 +185,10 @@ h2 {
 
 .stats-panel {
   grid-area: stats;
+}
+
+.reference-panel {
+  grid-area: reference;
 }
 
 .trades-panel {
@@ -215,15 +220,13 @@ h2 {
 }
 
 .ticket-form,
-.cancel-form,
-.raw-form {
+.cancel-form {
   display: grid;
   gap: 12px;
   padding: 14px;
 }
 
-.cancel-form,
-.raw-form {
+.cancel-form {
   border-top: 1px solid var(--line-soft);
 }
 
@@ -322,10 +325,6 @@ select:focus {
   border-color: var(--cyan);
 }
 
-.raw-form input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
 .message {
   min-height: 36px;
   margin: 0 14px 14px;
@@ -373,6 +372,35 @@ select:focus {
   line-height: 1.1;
 }
 
+.book-depth-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.book-depth-summary div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #14171a;
+}
+
+.book-depth-summary span,
+.book-depth-summary em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.book-depth-summary strong {
+  font-size: 18px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
 .book-ladder {
   padding: 12px 14px 14px;
 }
@@ -398,7 +426,8 @@ select:focus {
   min-height: 46px;
 }
 
-.level-row {
+.level-row,
+.resting-order-row {
   position: relative;
   height: 42px;
   overflow: hidden;
@@ -409,7 +438,8 @@ select:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.level-row.empty {
+.level-row.empty,
+.resting-order-row.empty {
   color: var(--muted);
 }
 
@@ -429,7 +459,9 @@ select:focus {
   background: var(--buy-soft);
 }
 
-.level-row span {
+.level-row span,
+.resting-order-row span,
+.resting-order-row strong {
   position: relative;
   z-index: 1;
 }
@@ -448,14 +480,92 @@ select:focus {
   background: var(--line);
 }
 
-.stats-grid {
+.resting-book {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.resting-side {
+  min-width: 0;
+}
+
+.resting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 30px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.resting-orders {
+  display: grid;
+  gap: 6px;
+  max-height: 246px;
+  overflow: auto;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+
+.resting-order-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 0.9fr) minmax(58px, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resting-order-row span,
+.resting-order-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resting-order-row strong {
+  overflow: visible;
+  text-align: right;
+}
+
+.resting-order-id {
+  color: var(--muted-strong);
+}
+
+.resting-price.bid {
+  color: #bdf1d5;
+}
+
+.resting-price.ask {
+  color: #ffb9bf;
+}
+
+.bid-orders .level-fill {
+  background: var(--buy-soft);
+}
+
+.ask-orders .level-fill {
+  margin-left: auto;
+  background: var(--sell-soft);
+}
+
+.stats-grid,
+.reference-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--line-soft);
 }
 
-.stat {
+.stat,
+.reference-item {
   min-height: 78px;
   display: grid;
   align-content: center;
@@ -464,19 +574,24 @@ select:focus {
   background: var(--panel);
 }
 
-.stat span {
+.stat span,
+.reference-item span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.stat strong {
+.stat strong,
+.reference-item strong {
   font-size: 22px;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .table-wrap {
   overflow: auto;
-  max-height: 310px;
+  min-height: 230px;
+  max-height: 360px;
+  overscroll-behavior: contain;
 }
 
 table {
@@ -514,8 +629,11 @@ th {
 .open-orders,
 .stream-list {
   display: grid;
-  max-height: 310px;
+  align-content: start;
+  min-height: 230px;
+  max-height: 360px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .order-row,
@@ -578,6 +696,14 @@ th {
   border-left: 3px solid var(--sell);
 }
 
+.table-wrap,
+.open-orders,
+.stream-list,
+.resting-orders {
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
 .empty-state {
   padding: 20px 14px;
   color: var(--muted);
@@ -589,6 +715,7 @@ th {
     grid-template-columns: minmax(300px, 360px) minmax(360px, 1fr);
     grid-template-areas:
       "ticket book"
+      "ticket reference"
       "ticket stats"
       "trades orders"
       "stream stream";
@@ -614,6 +741,7 @@ th {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "ticket"
+      "reference"
       "book"
       "stats"
       "trades"
@@ -622,7 +750,10 @@ th {
   }
 
   .form-grid,
-  .stats-grid {
+  .stats-grid,
+  .reference-grid,
+  .book-depth-summary,
+  .resting-book {
     grid-template-columns: minmax(0, 1fr);
   }
 

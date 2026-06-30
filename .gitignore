@@ -29,6 +29,7 @@ accepted-input.log
 .vscode/
 .idea/
 .claude/
+.wrangler/
 *.swp
 *.swo
 .DS_Store
