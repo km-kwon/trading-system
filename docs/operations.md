@@ -25,6 +25,36 @@ Browser
 
 ## 평소 실행 순서
 
+아침에 한 번에 켜려면 다음 스크립트를 사용합니다.
+
+```bash
+./scripts/start_cloudflare_preview.sh
+```
+
+이 스크립트는 기존 local bridge/tunnel 프로세스를 정리한 뒤 다음 작업을 자동으로 수행합니다.
+
+- `web/bridge.py --start-engine` 실행
+- Cloudflare quick tunnel 실행
+- 새 `https://...trycloudflare.com` 주소 추출
+- Pages preview secret `ATS_BRIDGE_ORIGIN` 갱신
+- 임시 Wrangler workspace에 `ATS_BRIDGE_PROXY_ORIGIN` fallback var 주입
+- Cloudflare Pages `master` preview branch 재배포로 Functions 환경변수 반영
+- `https://master.mini-ats-trading-console.pages.dev/api/health` 확인
+
+종료할 때는:
+
+```bash
+./scripts/start_cloudflare_preview.sh --stop-only
+```
+
+bridge/tunnel은 살아 있는데 Cloudflare secret 또는 deploy 단계에서만 실패했다면:
+
+```bash
+./scripts/start_cloudflare_preview.sh --deploy-only
+```
+
+수동으로 실행하려면 아래 절차를 따릅니다.
+
 터미널 1에서 local bridge와 C++ engine을 실행합니다.
 
 ```bash
@@ -48,33 +78,24 @@ python3 web/bridge.py --host 127.0.0.1 --port 8080 --start-engine
 https://master.mini-ats-trading-console.pages.dev
 ```
 
-이 주소는 preview environment secret을 사용합니다.
-따라서 tunnel 주소가 바뀌면 preview secret을 다시 넣어야 합니다.
+이 주소는 preview deployment입니다.
+현재 repo의 `wrangler.toml`에 `pages_build_output_dir`가 있어서 Cloudflare Pages는 Wrangler config를 배포 설정의 source of truth로 사용합니다.
+그래서 secret을 넣은 뒤 새 배포까지 해야 Function 런타임 환경변수에 반영됩니다.
 
 ```bash
-npx wrangler pages secret put ATS_BRIDGE_ORIGIN --project-name mini-ats-trading-console --env preview
+./scripts/start_cloudflare_preview.sh
 ```
 
-값 입력 프롬프트에 새 tunnel 주소를 넣습니다.
-
-```text
-https://...trycloudflare.com
-```
-
-확인:
-
-```bash
-npx wrangler pages secret list --project-name mini-ats-trading-console --env preview
-```
-
-`ATS_BRIDGE_ORIGIN: Value Encrypted`가 보이면 정상입니다.
+스크립트는 현재 quick tunnel URL을 Pages secret `ATS_BRIDGE_ORIGIN`에 넣고, `.runtime/cloudflare-preview/deploy-cwd/`에 `web`, `functions`, `wrangler.toml` 배포 사본을 만든 뒤 그 임시 workspace에서 재배포합니다.
+Pages Functions는 `ATS_BRIDGE_ORIGIN`을 우선 읽고, direct upload preview에서 secret이 런타임에 비어 있으면 임시 config의 `ATS_BRIDGE_PROXY_ORIGIN` fallback을 읽습니다.
+quick tunnel 주소는 매번 바뀌므로 repo의 `wrangler.toml`에는 넣지 않습니다.
 
 ## 재배포
 
 UI 또는 Pages Functions 파일을 수정한 뒤:
 
 ```bash
-npx wrangler pages deploy web --project-name mini-ats-trading-console
+./scripts/start_cloudflare_preview.sh
 ```
 
 배포 후 주로 확인할 주소:

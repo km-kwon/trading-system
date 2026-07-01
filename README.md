@@ -132,6 +132,12 @@ python3 web/bridge.py
 Cloudflare Pages preview 배포는 정적 UI와 Pages Functions만 올리고, local bridge와 C++ engine은 WSL에서 실행한 뒤 Cloudflare Tunnel로 연결합니다.
 운영/재배포 절차는 [운영 Runbook](docs/operations.md)을 참고하세요.
 
+아침에 quick tunnel을 새로 열고 Pages preview 배포에 현재 bridge 주소까지 반영하려면:
+
+```bash
+./scripts/start_cloudflare_preview.sh
+```
+
 ## PostgreSQL 기준정보
 
 `MINI_ATS_DB_NAME`과 `MINI_ATS_DB_USER`를 지정하지 않으면 각각 `mini_ats`, 현재 Linux 사용자를 사용합니다.

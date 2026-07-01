@@ -1,5 +1,5 @@
 function bridgeOrigin(env) {
-  const origin = env.ATS_BRIDGE_ORIGIN;
+  const origin = env.ATS_BRIDGE_ORIGIN || env.ATS_BRIDGE_PROXY_ORIGIN;
   if (!origin) {
     return null;
   }
