@@ -4,6 +4,29 @@ Mini ATS Matching System은 거래소 내부의 매매 체결 시스템을 작�
 
 이 프로젝트는 자동매매 봇, 주가 예측, 백테스팅 수익률 프로젝트가 아닙니다. 목표는 주문 접수, in-memory order book, 가격-시간 우선 체결, 기준정보 검증, replay 가능한 결정성, TCP/UDP adapter, 운영 통계까지 이어지는 매매체결 시스템의 핵심 경계를 설명 가능한 코드로 구현하는 것입니다.
 
+## 한눈에 보기
+
+```text
+stdin / TCP client
+        │  newline-delimited text command
+        ▼
+ Order Gateway ───── accepted command ─────▶ Replay Log
+        │
+        ▼
+ Replay validation ─▶ Matching Engine ─────▶ Execution Reports
+                              │
+                              ├─────────────▶ Trade / Book Events ─▶ UDP
+                              └─────────────▶ Operational Statistics
+```
+
+핵심 설계 원칙은 다음과 같습니다.
+
+- 가격과 수량은 부동소수점이 아닌 정수 타입으로 표현합니다.
+- matching core는 socket, 파일, DB 같은 I/O와 분리합니다.
+- 모든 command는 명시적인 input sequence와 reference version을 가집니다.
+- recorder는 파싱과 검증, 엔진 적용을 통과한 `ACCEPTED` command만 canonical 형식으로 기록합니다.
+- 동일한 기준정보와 accepted input log를 사용하면 동일한 처리 결과를 재현할 수 있도록 설계했습니다.
+
 ## 직무 연결
 
 넥스트레이드 매매체결 IT 시스템 직무는 투자 전략보다 시스템 프로그래밍, 정확성, 결정성, 프로토콜 처리, 운영 관측 가능성에 더 가깝다고 판단했습니다. 이 프로젝트는 그 역량을 다음 방식으로 보여줍니다.
@@ -52,30 +75,43 @@ Mini ATS Matching System은 거래소 내부의 매매 체결 시스템을 작�
 
 ## 개발 환경
 
-- WSL2 Ubuntu
-- C++20
-- CMake
-- g++ 또는 clang++
-- GoogleTest
-- local PostgreSQL
-- Docker 사용 안 함
-- Windows 전용 Visual Studio `.sln` 프로젝트 사용 안 함
+- 필수: C++20 compiler(g++ 또는 clang++), CMake 3.20 이상, GoogleTest
+- 웹 콘솔 사용 시: Python 3
+- DB 기준정보 사용 시: local PostgreSQL과 `psql`
+- 배포 preview 사용 시: Node.js/npm, Wrangler, Cloudflare Tunnel
 
-## 빠른 검증
+기준 개발 환경은 WSL2 Ubuntu입니다. Docker와 Windows 전용 Visual Studio `.sln` 프로젝트는 사용하지 않습니다.
+
+## 빠른 시작
 
 ```bash
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build
+./build/mini_ats
 ```
 
-또는:
+빌드와 테스트만 한 번에 실행하려면:
 
 ```bash
 ./scripts/run_tests.sh
 ```
 
 현재 C++ 테스트는 PostgreSQL 서버 없이 실행됩니다. 기준정보 DB adapter는 DB row 모양의 값과 `psql` 출력 parsing 경계를 unit test로 검증합니다.
+
+지원하는 실행 모드는 다음 명령으로 확인할 수 있습니다.
+
+```bash
+./build/mini_ats --help
+```
+
+| 모드 | 용도 |
+| --- | --- |
+| 옵션 없음 | 결정적인 내장 체결 시나리오 실행 |
+| `--gateway` | stdin에서 text command 처리 |
+| `--tcp --port <port>` | `127.0.0.1`에서 TCP order gateway 실행 |
+| `--benchmark` | 고정 gateway 시나리오 benchmark 실행 |
+| `--load-instrument` | PostgreSQL에서 단일 instrument 기준정보 조회 |
 
 ## 실행 예시
 
@@ -102,6 +138,8 @@ printf '%s\n' \
   | ./build/mini_ats --gateway --record-log accepted-input.log
 ```
 
+`--record-log`는 파일을 append 모드로 열며, 거부된 command는 기록하지 않습니다. 따라서 이 파일은 단순 요청 이력이 아니라 엔진 상태 복구에 사용할 수 있는 accepted input stream입니다.
+
 TCP order gateway:
 
 ```bash
@@ -122,6 +160,8 @@ python3 web/bridge.py --start-engine
 
 브라우저에서 `http://127.0.0.1:8080`을 열면 주문 입력, 호가, 체결, open order, gateway 응답을 한 화면에서 볼 수 있습니다. 이 명령은 bridge가 `./build/mini_ats --tcp --port 9001 --market-data 127.0.0.1 9100 --stats`를 자식 프로세스로 함께 실행합니다.
 
+웹 콘솔을 실행하기 전에 C++ executable이 `build/mini_ats`에 빌드되어 있어야 합니다. bridge 자체는 Python 표준 라이브러리만 사용합니다.
+
 엔진을 직접 띄우고 웹 콘솔만 따로 붙일 수도 있습니다.
 
 ```bash
@@ -141,6 +181,17 @@ Cloudflare Pages preview 배포는 정적 UI와 Pages Functions만 올리고, lo
 ## PostgreSQL 기준정보
 
 `MINI_ATS_DB_NAME`과 `MINI_ATS_DB_USER`를 지정하지 않으면 각각 `mini_ats`, 현재 Linux 사용자를 사용합니다.
+
+DB loader 옵션 없이 gateway를 실행하면 다음 내장 기준정보를 사용합니다.
+
+| 필드 | 기본값 |
+| --- | ---: |
+| `instrument_id` | `1001` |
+| `tick_size` | `5` |
+| `lower_price_limit` | `70000` |
+| `upper_price_limit` | `80000` |
+| `session` | `OPEN` |
+| `reference_version` | `7` |
 
 ```bash
 ./scripts/setup_postgres.sh
@@ -245,8 +296,13 @@ TSV/CSV 변환:
 │   ├── replay/
 │   ├── stats/
 │   └── main.cpp
-└── tests/
-    └── unit/
+├── tests/
+│   └── unit/
+└── web/
+    ├── bridge.py
+    ├── index.html
+    ├── app.js
+    └── styles.css
 ```
 
 ## 다음 확장 후보

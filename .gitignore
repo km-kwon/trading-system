@@ -30,6 +30,7 @@ accepted-input.log
 .vscode/
 .idea/
 .claude/
+.interview_docs/
 .wrangler/
 *.swp
 *.swo
